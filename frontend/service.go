@@ -3,12 +3,7 @@ package frontend
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"time"
-
-	"github.com/arcgolabs/httpx"
-	"github.com/lyonbrown4d/nespa/cacheapi"
-	"github.com/lyonbrown4d/nespa/runtime"
 )
 
 type Config struct {
@@ -21,7 +16,6 @@ type ServiceRuntime struct {
 	cfg           Config
 	routeCache    *RouteCache
 	controlClient *ControlClient
-	nodeClient    *NodeClient
 }
 
 func NewServiceRuntime(cfg Config) *ServiceRuntime {
@@ -34,23 +28,6 @@ func NewServiceRuntime(cfg Config) *ServiceRuntime {
 		cfg:           cfg,
 		routeCache:    NewRouteCache("bootstrap", initialRoutes),
 		controlClient: NewControlClient(cfg.ControlAddr),
-		nodeClient:    NewNodeClient(),
-	}
-}
-
-func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
-	cfg := svc.cfg
-	return runtime.HTTPConfig{
-		Name: "frontend",
-		Addr: cfg.Addr,
-		Metadata: map[string]string{
-			"control_addr": cfg.ControlAddr,
-			"node_addr":    cfg.NodeAddr,
-			"role":         "gateway",
-		},
-		Routes: func(server httpx.ServerRuntime) {
-			registerFrontendRoutes(server, svc)
-		},
 	}
 }
 
@@ -63,59 +40,8 @@ func StartRouteRefresh(ctx context.Context, logger *slog.Logger, svc *ServiceRun
 	return nil
 }
 
-func registerFrontendRoutes(server httpx.ServerRuntime, svc *ServiceRuntime) {
-	httpx.MustGet(server, "/v1/frontend/routes", frontendRoutesHandler(svc))
-	httpx.MustPut(server, "/v1/cache", frontendSetHandler(svc))
-	httpx.MustGet(server, "/v1/cache", frontendGetHandler(svc))
-	httpx.MustDelete(server, "/v1/cache", frontendDeleteHandler(svc))
-}
-
-func frontendRoutesHandler(svc *ServiceRuntime) func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[RoutesBody], error) {
-	return func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[RoutesBody], error) {
-		return runtime.JSON(svc.routeCache.Snapshot()), nil
-	}
-}
-
-func frontendSetHandler(svc *ServiceRuntime) func(context.Context, *cacheapi.SetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
-	return func(ctx context.Context, input *cacheapi.SetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
-		route, ok := svc.routeCache.Select(input.Body.Namespace, input.Body.Space)
-		if !ok {
-			return nil, httpx.NewError(http.StatusServiceUnavailable, "no data-node route available")
-		}
-		rec, err := svc.nodeClient.Set(ctx, route.Addr, input.Body)
-		if err != nil {
-			return nil, err
-		}
-		return runtime.JSON(rec), nil
-	}
-}
-
-func frontendGetHandler(svc *ServiceRuntime) func(context.Context, *cacheapi.GetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
-	return func(ctx context.Context, input *cacheapi.GetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
-		route, ok := svc.routeCache.Select(input.Namespace, input.Space)
-		if !ok {
-			return nil, httpx.NewError(http.StatusServiceUnavailable, "no data-node route available")
-		}
-		rec, err := svc.nodeClient.Get(ctx, route.Addr, *input)
-		if err != nil {
-			return nil, err
-		}
-		return runtime.JSON(rec), nil
-	}
-}
-
-func frontendDeleteHandler(svc *ServiceRuntime) func(context.Context, *cacheapi.DeleteInput) (*runtime.JSONResponse[cacheapi.DeleteBody], error) {
-	return func(ctx context.Context, input *cacheapi.DeleteInput) (*runtime.JSONResponse[cacheapi.DeleteBody], error) {
-		route, ok := svc.routeCache.Select(input.Namespace, input.Space)
-		if !ok {
-			return nil, httpx.NewError(http.StatusServiceUnavailable, "no data-node route available")
-		}
-		out, err := svc.nodeClient.Delete(ctx, route.Addr, *input)
-		if err != nil {
-			return nil, err
-		}
-		return runtime.JSON(out), nil
-	}
+func (s *ServiceRuntime) Routes() RoutesBody {
+	return s.routeCache.Snapshot()
 }
 
 func runRouteRefreshLoop(ctx context.Context, logger *slog.Logger, client *ControlClient, cache *RouteCache, source string, interval time.Duration) {

@@ -48,3 +48,8 @@ type RecordBody struct {
 type DeleteBody struct {
 	Deleted bool `json:"deleted"`
 }
+
+type ErrorBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}

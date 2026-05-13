@@ -9,6 +9,8 @@ import (
 
 	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/eventx"
+	"github.com/arcgolabs/httpx/adapter"
+	fiberadapter "github.com/arcgolabs/httpx/adapter/fiber"
 	"github.com/lyonbrown4d/nespa/admin"
 	"github.com/lyonbrown4d/nespa/cache"
 	"github.com/lyonbrown4d/nespa/cache/engine"
@@ -16,6 +18,7 @@ import (
 	"github.com/lyonbrown4d/nespa/frontend"
 	"github.com/lyonbrown4d/nespa/node"
 	"github.com/lyonbrown4d/nespa/runtime"
+	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
 )
 
 func foundationModule(logger *slog.Logger) dix.Module {
@@ -87,12 +90,16 @@ func frontendModule() dix.Module {
 	return dix.NewModule("frontend",
 		dix.WithModuleProviders(
 			dix.Provider1(frontend.NewServiceRuntime),
-		),
-		dix.WithModuleImports(
-			configuredHTTPModule[*frontend.ServiceRuntime]("frontend", frontend.HTTPConfig),
+			dix.ProviderErr2(frontend.NewWebServer),
 		),
 		dix.WithModuleHooks(
-			dix.OnStart2[*slog.Logger, *frontend.ServiceRuntime](frontend.StartRouteRefresh, dix.LifecycleName("frontend.routes.refresh"), dix.LifecycleBefore("frontend.http.start")),
+			dix.OnStart2[*slog.Logger, *frontend.ServiceRuntime](frontend.StartRouteRefresh, dix.LifecycleName("frontend.routes.refresh"), dix.LifecycleBefore("frontend.web.start")),
+			dix.OnStart2[*slog.Logger, *frontend.WebServer](func(ctx context.Context, logger *slog.Logger, server *frontend.WebServer) error {
+				return server.Start(ctx, logger)
+			}, dix.LifecycleName("frontend.web.start")),
+			dix.OnStop[*frontend.WebServer](func(ctx context.Context, server *frontend.WebServer) error {
+				return server.Stop(ctx)
+			}, dix.LifecycleName("frontend.web.stop")),
 		),
 	)
 }
@@ -112,19 +119,33 @@ func nodeModule() dix.Module {
 				}))
 			}),
 			dix.Provider2(node.NewServiceRuntime),
+			dix.Provider2(func(cfg node.Config, svc cache.Service) *cachetcp.Server {
+				return cachetcp.NewServer(cachetcp.ServerConfig{Addr: cfg.Addr}, svc)
+			}),
 		),
 		dix.WithModuleImports(
 			engineModule(eng, time.Second),
-			configuredHTTPModule[*node.ServiceRuntime]("node", node.HTTPConfig),
 		),
 		dix.WithModuleHooks(
-			dix.OnStart2[*slog.Logger, *node.ServiceRuntime](node.StartControlRegistration, dix.LifecycleName("node.control.register"), dix.LifecycleAfter("node.http.start")),
+			dix.OnStart2[*slog.Logger, *cachetcp.Server](func(ctx context.Context, logger *slog.Logger, server *cachetcp.Server) error {
+				return server.Start(ctx, logger)
+			}, dix.LifecycleName("node.tcp.start")),
+			dix.OnStart2[*slog.Logger, *node.ServiceRuntime](node.StartControlRegistration, dix.LifecycleName("node.control.register"), dix.LifecycleAfter("node.tcp.start")),
+			dix.OnStop[*cachetcp.Server](func(ctx context.Context, server *cachetcp.Server) error {
+				return server.Stop(ctx)
+			}, dix.LifecycleName("node.tcp.stop")),
 		),
 	)
 }
 
 func adminModule() dix.Module {
-	return configuredHTTPModule[admin.Config]("admin", admin.HTTPConfig)
+	return configuredHTTPModule[admin.Config]("admin", func(cfg admin.Config) runtime.HTTPConfig {
+		httpCfg := admin.HTTPConfig(cfg)
+		httpCfg.Adapter = func() adapter.Host {
+			return fiberadapter.New(nil)
+		}
+		return httpCfg
+	})
 }
 
 func engineModule(eng engine.Engine, sweepInterval time.Duration) dix.Module {

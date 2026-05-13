@@ -11,6 +11,7 @@ import (
 
 	"github.com/arcgolabs/eventx"
 	"github.com/arcgolabs/httpx"
+	"github.com/arcgolabs/httpx/adapter"
 )
 
 type HTTPConfig struct {
@@ -18,6 +19,7 @@ type HTTPConfig struct {
 	Addr     string
 	Metadata map[string]string
 	Routes   func(httpx.ServerRuntime)
+	Adapter  func() adapter.Host
 }
 
 type HTTPService struct {
@@ -25,6 +27,7 @@ type HTTPService struct {
 	addr     string
 	metadata map[string]string
 	routes   func(httpx.ServerRuntime)
+	adapter  func() adapter.Host
 
 	mu     sync.Mutex
 	server httpx.ServerRuntime
@@ -40,6 +43,7 @@ func NewHTTPService(cfg HTTPConfig) *HTTPService {
 		addr:     cfg.Addr,
 		metadata: metadata,
 		routes:   cfg.Routes,
+		adapter:  cfg.Adapter,
 	}
 }
 
@@ -60,10 +64,7 @@ func (s *HTTPService) Start(ctx context.Context, logger *slog.Logger, bus eventx
 	}
 
 	server := httpx.New(
-		httpx.WithLogger(logger),
-		httpx.WithOpenAPIInfo("Nespa "+s.name, "dev", "Nespa "+s.name+" service"),
-		httpx.WithPanicRecover(true),
-		httpx.WithAccessLog(false),
+		s.serverOptions(logger)...,
 	)
 
 	s.registerBaseRoutes(server)
@@ -97,6 +98,19 @@ func (s *HTTPService) Start(ctx context.Context, logger *slog.Logger, bus eventx
 	case <-ctx.Done():
 		return fmt.Errorf("%s start canceled: %w", s.name, ctx.Err())
 	}
+}
+
+func (s *HTTPService) serverOptions(logger *slog.Logger) []httpx.ServerOption {
+	opts := []httpx.ServerOption{
+		httpx.WithLogger(logger),
+		httpx.WithOpenAPIInfo("Nespa "+s.name, "dev", "Nespa "+s.name+" service"),
+		httpx.WithPanicRecover(true),
+		httpx.WithAccessLog(false),
+	}
+	if s.adapter != nil {
+		opts = append(opts, httpx.WithAdapter(s.adapter()))
+	}
+	return opts
 }
 
 func (s *HTTPService) Stop(ctx context.Context, logger *slog.Logger, bus eventx.BusRuntime) error {

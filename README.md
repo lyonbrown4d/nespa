@@ -30,7 +30,7 @@ Default local endpoints:
 ```text
 control   http://127.0.0.1:7401
 frontend  http://127.0.0.1:7402
-node      http://127.0.0.1:7403
+node      tcp://127.0.0.1:7403
 admin     http://127.0.0.1:7404
 ```
 
@@ -39,7 +39,6 @@ Health checks:
 ```bash
 curl http://127.0.0.1:7401/healthz
 curl http://127.0.0.1:7402/healthz
-curl http://127.0.0.1:7403/healthz
 curl http://127.0.0.1:7404/healthz
 ```
 
@@ -49,30 +48,7 @@ Control-plane snapshot:
 curl http://127.0.0.1:7401/v1/control/state
 curl http://127.0.0.1:7401/v1/control/snapshot
 curl http://127.0.0.1:7401/v1/control/nodes
-curl http://127.0.0.1:7402/v1/frontend/routes
-```
-
-Node storage smoke test:
-
-```bash
-curl -X PUT http://127.0.0.1:7403/v1/node/cache \
-  -H 'content-type: application/json' \
-  -d '{"namespace":"order-service","space":"session","key":"u1","value":"payload","ttl_ms":60000}'
-
-curl 'http://127.0.0.1:7403/v1/node/cache?namespace=order-service&space=session&key=u1'
-curl http://127.0.0.1:7403/v1/node/stats
-curl -X DELETE 'http://127.0.0.1:7403/v1/node/cache?namespace=order-service&space=session&key=u1'
-```
-
-Frontend gateway smoke test:
-
-```bash
-curl -X PUT http://127.0.0.1:7402/v1/cache \
-  -H 'content-type: application/json' \
-  -d '{"namespace":"order-service","space":"session","key":"u1","value":"payload","ttl_ms":60000}'
-
-curl 'http://127.0.0.1:7402/v1/cache?namespace=order-service&space=session&key=u1'
-curl -X DELETE 'http://127.0.0.1:7402/v1/cache?namespace=order-service&space=session&key=u1'
+curl http://127.0.0.1:7402/routes
 ```
 
 Useful startup flags:
@@ -91,8 +67,9 @@ Quota flags use bytes. A value of `0` disables that limit.
 
 ## Data Protocol
 
-The data plane is moving toward a TCP framed protocol. HTTP remains for admin,
-debug, health, and console APIs.
+The data plane uses a TCP framed protocol between cache transports. HTTP remains
+for control APIs, the Fiber-template frontend WebUI, admin, debug, health, and
+console APIs.
 
 The current frame header is fixed-width and big-endian:
 
