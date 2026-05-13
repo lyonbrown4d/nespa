@@ -11,6 +11,8 @@ import (
 const (
 	controlModeBootstrap = "bootstrap"
 	nodeStateHealthy     = "healthy"
+	nodeStateSuspect     = "suspect"
+	nodeStateDead        = "dead"
 )
 
 type ControlState struct {
@@ -19,6 +21,11 @@ type ControlState struct {
 	revision  uint64
 	nodes     map[string]controlapi.NodeBody
 	now       func() time.Time
+}
+
+type LivenessResult struct {
+	Revision uint64
+	Changed  []controlapi.NodeBody
 }
 
 func NewControlState(clusterID string) *ControlState {
@@ -82,6 +89,41 @@ func (s *ControlState) Heartbeat(nodeID, addr string) controlapi.HeartbeatRespon
 	}
 }
 
+func (s *ControlState) AdvanceLiveness(now time.Time, suspectAfter, deadAfter time.Duration) LivenessResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var changed []controlapi.NodeBody
+	for nodeID, node := range s.nodes {
+		if node.LastSeenUnix <= 0 {
+			continue
+		}
+
+		nextState := node.State
+		lastSeen := time.Unix(node.LastSeenUnix, 0)
+		age := now.Sub(lastSeen)
+		switch {
+		case deadAfter > 0 && age >= deadAfter:
+			nextState = nodeStateDead
+		case suspectAfter > 0 && age >= suspectAfter:
+			nextState = nodeStateSuspect
+		}
+
+		if node.State == nextState {
+			continue
+		}
+		node.State = nextState
+		s.nodes[nodeID] = node
+		s.revision++
+		changed = append(changed, node)
+	}
+
+	return LivenessResult{
+		Revision: s.revision,
+		Changed:  changed,
+	}
+}
+
 func (s *ControlState) State() controlapi.StateBody {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -93,17 +135,21 @@ func (s *ControlState) State() controlapi.StateBody {
 	}
 }
 
+func (s *ControlState) Nodes() controlapi.NodesBody {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return controlapi.NodesBody{
+		Revision: s.revision,
+		Nodes:    s.sortedNodesLocked(),
+	}
+}
+
 func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	nodes := make([]controlapi.NodeBody, 0, len(s.nodes))
-	for _, node := range s.nodes {
-		nodes = append(nodes, node)
-	}
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].NodeID < nodes[j].NodeID
-	})
+	nodes := s.sortedNodesLocked()
 
 	routes := make([]controlapi.RouteBody, 0, len(nodes))
 	for _, node := range nodes {
@@ -124,4 +170,15 @@ func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 		Nodes:     nodes,
 		Routes:    routes,
 	}
+}
+
+func (s *ControlState) sortedNodesLocked() []controlapi.NodeBody {
+	nodes := make([]controlapi.NodeBody, 0, len(s.nodes))
+	for _, node := range s.nodes {
+		nodes = append(nodes, node)
+	}
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].NodeID < nodes[j].NodeID
+	})
+	return nodes
 }

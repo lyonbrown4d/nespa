@@ -36,6 +36,13 @@ func NewRouteCache(source string, routes []Route) *RouteCache {
 }
 
 func (c *RouteCache) UpdateFromSnapshot(snapshot controlapi.SnapshotBody, source string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if snapshot.Revision == 0 || c.epoch == snapshot.Revision {
+		return false
+	}
+
 	routes := make([]Route, 0, len(snapshot.Routes))
 	for _, route := range snapshot.Routes {
 		routes = append(routes, Route{
@@ -47,15 +54,7 @@ func (c *RouteCache) UpdateFromSnapshot(snapshot controlapi.SnapshotBody, source
 			Weight:    route.Weight,
 		})
 	}
-	if len(routes) == 0 {
-		return false
-	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.epoch == snapshot.Revision {
-		return false
-	}
 	c.epoch = snapshot.Revision
 	c.source = source
 	c.routes = routes

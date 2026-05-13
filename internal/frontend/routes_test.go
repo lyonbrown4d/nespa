@@ -50,15 +50,31 @@ func TestRouteCacheUpdateFromSnapshot(t *testing.T) {
 	}
 }
 
-func TestRouteCacheIgnoresEmptySnapshotRoutes(t *testing.T) {
+func TestRouteCacheIgnoresInitialEmptySnapshotRoutes(t *testing.T) {
 	cache := NewRouteCache("bootstrap", []Route{{Role: "data-node", Addr: "bootstrap"}})
-	updated := cache.UpdateFromSnapshot(controlapi.SnapshotBody{Revision: 8}, "control")
+	updated := cache.UpdateFromSnapshot(controlapi.SnapshotBody{Revision: 0}, "control")
 	if updated {
-		t.Fatal("expected empty snapshot to be ignored")
+		t.Fatal("expected initial empty snapshot to be ignored")
 	}
 
 	route, ok := cache.Select("orders", "session")
 	if !ok || route.Addr != "bootstrap" {
 		t.Fatalf("route = %+v, %v", route, ok)
+	}
+}
+
+func TestRouteCacheAppliesRevisedEmptySnapshotRoutes(t *testing.T) {
+	cache := NewRouteCache("bootstrap", []Route{{Role: "data-node", Addr: "bootstrap"}})
+	updated := cache.UpdateFromSnapshot(controlapi.SnapshotBody{Revision: 8}, "control")
+	if !updated {
+		t.Fatal("expected revised empty snapshot to be applied")
+	}
+
+	if route, ok := cache.Select("orders", "session"); ok {
+		t.Fatalf("unexpected route after empty snapshot: %+v", route)
+	}
+	snapshot := cache.Snapshot()
+	if snapshot.RouteEpoch != 8 || len(snapshot.Routes) != 0 {
+		t.Fatalf("unexpected snapshot: %+v", snapshot)
 	}
 }

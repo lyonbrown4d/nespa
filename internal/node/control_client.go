@@ -32,6 +32,10 @@ func (c *ControlClient) RegisterNode(ctx context.Context, body controlapi.Regist
 	return controlDoJSON[controlapi.RegisterNodeResponse](ctx, c.client, http.MethodPost, c.baseURL+"/v1/control/nodes", body)
 }
 
+func (c *ControlClient) Heartbeat(ctx context.Context, body controlapi.HeartbeatBody) (controlapi.HeartbeatResponse, error) {
+	return controlDoJSON[controlapi.HeartbeatResponse](ctx, c.client, http.MethodPut, c.baseURL+"/v1/control/nodes/heartbeat", body)
+}
+
 func normalizeBaseURL(addr string) string {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {

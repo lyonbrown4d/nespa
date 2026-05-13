@@ -29,6 +29,11 @@ type SnapshotBody struct {
 	Routes    []RouteBody `json:"routes"`
 }
 
+type NodesBody struct {
+	Revision uint64     `json:"revision"`
+	Nodes    []NodeBody `json:"nodes"`
+}
+
 type RegisterNodeInput struct {
 	Body RegisterNodeBody
 }

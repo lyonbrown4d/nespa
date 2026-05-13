@@ -120,9 +120,33 @@ type identityConfig struct {
 	ID string `mapstructure:"id"`
 }
 
+type afterConfig struct {
+	After time.Duration `mapstructure:"after"`
+}
+
+type intervalConfig struct {
+	Interval time.Duration `mapstructure:"interval"`
+}
+
+type controlLivenessConfig struct {
+	Sweep   intervalConfig `mapstructure:"sweep"`
+	Suspect afterConfig    `mapstructure:"suspect"`
+	Dead    afterConfig    `mapstructure:"dead"`
+}
+
+type controlConfig struct {
+	Addr     string                `mapstructure:"addr"`
+	Liveness controlLivenessConfig `mapstructure:"liveness"`
+}
+
 type nodeConfig struct {
-	Addr  string      `mapstructure:"addr"`
-	Quota quotaConfig `mapstructure:"quota"`
+	Addr      string          `mapstructure:"addr"`
+	Heartbeat heartbeatConfig `mapstructure:"heartbeat"`
+	Quota     quotaConfig     `mapstructure:"quota"`
+}
+
+type heartbeatConfig struct {
+	Interval time.Duration `mapstructure:"interval"`
 }
 
 type frontendConfig struct {
@@ -131,7 +155,7 @@ type frontendConfig struct {
 }
 
 type devConfig struct {
-	Control  endpointConfig `mapstructure:"control"`
+	Control  controlConfig  `mapstructure:"control"`
 	Frontend frontendConfig `mapstructure:"frontend"`
 	Node     nodeConfig     `mapstructure:"node"`
 	Admin    endpointConfig `mapstructure:"admin"`
@@ -149,8 +173,12 @@ func devCommand(ctx context.Context, stdout io.Writer, logger *slog.Logger) *cob
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfig[devConfig](cmd.Flags(), "NESPA", map[string]any{
 				"control.addr":                      "127.0.0.1:7401",
+				"control.liveness.sweep.interval":   5 * time.Second,
+				"control.liveness.suspect.after":    15 * time.Second,
+				"control.liveness.dead.after":       30 * time.Second,
 				"frontend.addr":                     "127.0.0.1:7402",
 				"node.addr":                         "127.0.0.1:7403",
+				"node.heartbeat.interval":           5 * time.Second,
 				"admin.addr":                        "127.0.0.1:7404",
 				"node.quota.namespace.memory.bytes": uint64(0),
 				"node.quota.space.memory.bytes":     uint64(0),
@@ -165,7 +193,15 @@ func devCommand(ctx context.Context, stdout io.Writer, logger *slog.Logger) *cob
 			}
 
 			modules := []dix.Module{
-				control.Module(control.Config{Addr: cfg.Control.Addr, ClusterID: "dev"}),
+				control.Module(control.Config{
+					Addr:      cfg.Control.Addr,
+					ClusterID: "dev",
+					Liveness: control.LivenessConfig{
+						SweepInterval: cfg.Control.Liveness.Sweep.Interval,
+						SuspectAfter:  cfg.Control.Liveness.Suspect.After,
+						DeadAfter:     cfg.Control.Liveness.Dead.After,
+					},
+				}),
 				frontend.Module(frontend.Config{
 					Addr:        cfg.Frontend.Addr,
 					ControlAddr: cfg.Control.Addr,
@@ -175,6 +211,7 @@ func devCommand(ctx context.Context, stdout io.Writer, logger *slog.Logger) *cob
 					Addr:                        cfg.Node.Addr,
 					ControlAddr:                 cfg.Control.Addr,
 					NodeID:                      "dev-node-1",
+					HeartbeatInterval:           cfg.Node.Heartbeat.Interval,
 					DefaultNamespaceMemoryBytes: cfg.Node.Quota.Namespace.Memory.Bytes,
 					DefaultSpaceMemoryBytes:     cfg.Node.Quota.Space.Memory.Bytes,
 				}),
@@ -196,9 +233,13 @@ func devCommand(ctx context.Context, stdout io.Writer, logger *slog.Logger) *cob
 	}
 
 	cmd.Flags().String("control-addr", "127.0.0.1:7401", "control-plane HTTP listen address")
+	cmd.Flags().Duration("control-liveness-sweep-interval", 5*time.Second, "control-plane node liveness sweep interval")
+	cmd.Flags().Duration("control-liveness-suspect-after", 15*time.Second, "mark data nodes suspect after this heartbeat age")
+	cmd.Flags().Duration("control-liveness-dead-after", 30*time.Second, "mark data nodes dead after this heartbeat age")
 	cmd.Flags().String("frontend-addr", "127.0.0.1:7402", "frontend HTTP listen address")
 	cmd.Flags().String("frontend-node-addr", "", "data-node address used by the frontend gateway; defaults to --node-addr")
 	cmd.Flags().String("node-addr", "127.0.0.1:7403", "data-node HTTP listen address")
+	cmd.Flags().Duration("node-heartbeat-interval", 5*time.Second, "data-node control-plane heartbeat interval")
 	cmd.Flags().String("admin-addr", "127.0.0.1:7404", "admin HTTP listen address")
 	cmd.Flags().Uint64("node-quota-namespace-memory-bytes", 0, "default namespace memory quota for the dev data node; 0 disables the limit")
 	cmd.Flags().Uint64("node-quota-space-memory-bytes", 0, "default space memory quota for the dev data node; 0 disables the limit")
@@ -206,8 +247,9 @@ func devCommand(ctx context.Context, stdout io.Writer, logger *slog.Logger) *cob
 }
 
 type controlCommandConfig struct {
-	Addr    string         `mapstructure:"addr"`
-	Cluster identityConfig `mapstructure:"cluster"`
+	Addr     string                `mapstructure:"addr"`
+	Cluster  identityConfig        `mapstructure:"cluster"`
+	Liveness controlLivenessConfig `mapstructure:"liveness"`
 }
 
 func controlCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
@@ -216,8 +258,11 @@ func controlCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 		Short: "Run the control-plane service",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfig[controlCommandConfig](cmd.Flags(), "NESPA_CONTROL", map[string]any{
-				"addr":       "127.0.0.1:7401",
-				"cluster.id": "local",
+				"addr":                    "127.0.0.1:7401",
+				"cluster.id":              "local",
+				"liveness.sweep.interval": 5 * time.Second,
+				"liveness.suspect.after":  15 * time.Second,
+				"liveness.dead.after":     30 * time.Second,
 			})
 			if err != nil {
 				return fmt.Errorf("load control config: %w", err)
@@ -226,12 +271,20 @@ func controlCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 			return runDixApp(ctx, logger, "nespa-control", control.Module(control.Config{
 				Addr:      cfg.Addr,
 				ClusterID: cfg.Cluster.ID,
+				Liveness: control.LivenessConfig{
+					SweepInterval: cfg.Liveness.Sweep.Interval,
+					SuspectAfter:  cfg.Liveness.Suspect.After,
+					DeadAfter:     cfg.Liveness.Dead.After,
+				},
 			}))
 		},
 	}
 
 	cmd.Flags().String("addr", "127.0.0.1:7401", "HTTP listen address")
 	cmd.Flags().String("cluster-id", "local", "cluster identifier")
+	cmd.Flags().Duration("liveness-sweep-interval", 5*time.Second, "node liveness sweep interval")
+	cmd.Flags().Duration("liveness-suspect-after", 15*time.Second, "mark data nodes suspect after this heartbeat age")
+	cmd.Flags().Duration("liveness-dead-after", 30*time.Second, "mark data nodes dead after this heartbeat age")
 	return cmd
 }
 
@@ -270,10 +323,11 @@ func frontendCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 }
 
 type nodeCommandConfig struct {
-	Addr    string         `mapstructure:"addr"`
-	Control endpointConfig `mapstructure:"control"`
-	Node    identityConfig `mapstructure:"node"`
-	Quota   quotaConfig    `mapstructure:"quota"`
+	Addr      string          `mapstructure:"addr"`
+	Control   endpointConfig  `mapstructure:"control"`
+	Node      identityConfig  `mapstructure:"node"`
+	Heartbeat heartbeatConfig `mapstructure:"heartbeat"`
+	Quota     quotaConfig     `mapstructure:"quota"`
 }
 
 func nodeCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
@@ -285,6 +339,7 @@ func nodeCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 				"addr":                         "127.0.0.1:7403",
 				"control.addr":                 "127.0.0.1:7401",
 				"node.id":                      "node-1",
+				"heartbeat.interval":           5 * time.Second,
 				"quota.namespace.memory.bytes": uint64(0),
 				"quota.space.memory.bytes":     uint64(0),
 			})
@@ -296,6 +351,7 @@ func nodeCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 				Addr:                        cfg.Addr,
 				ControlAddr:                 cfg.Control.Addr,
 				NodeID:                      cfg.Node.ID,
+				HeartbeatInterval:           cfg.Heartbeat.Interval,
 				DefaultNamespaceMemoryBytes: cfg.Quota.Namespace.Memory.Bytes,
 				DefaultSpaceMemoryBytes:     cfg.Quota.Space.Memory.Bytes,
 			}))
@@ -305,6 +361,7 @@ func nodeCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 	cmd.Flags().String("addr", "127.0.0.1:7403", "HTTP listen address")
 	cmd.Flags().String("control-addr", "127.0.0.1:7401", "control-plane address")
 	cmd.Flags().String("node-id", "node-1", "data-node identifier")
+	cmd.Flags().Duration("heartbeat-interval", 5*time.Second, "control-plane heartbeat interval")
 	cmd.Flags().Uint64("quota-namespace-memory-bytes", 0, "default namespace memory quota; 0 disables the limit")
 	cmd.Flags().Uint64("quota-space-memory-bytes", 0, "default space memory quota; 0 disables the limit")
 	return cmd

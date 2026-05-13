@@ -21,6 +21,7 @@ type Config struct {
 	Addr                        string
 	ControlAddr                 string
 	NodeID                      string
+	HeartbeatInterval           time.Duration
 	DefaultNamespaceMemoryBytes uint64
 	DefaultSpaceMemoryBytes     uint64
 }
@@ -44,6 +45,10 @@ func Module(cfg Config) dix.Module {
 		DefaultSpaceMemoryBytes:     cfg.DefaultSpaceMemoryBytes,
 	}))
 	controlClient := NewControlClient(cfg.ControlAddr)
+	heartbeatInterval := cfg.HeartbeatInterval
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = 5 * time.Second
+	}
 
 	return dix.NewModule("node",
 		dix.WithModuleImports(
@@ -113,19 +118,46 @@ func Module(cfg Config) dix.Module {
 				if strings.TrimSpace(cfg.ControlAddr) == "" {
 					return nil
 				}
-				resp, err := controlClient.RegisterNode(ctx, controlapi.RegisterNodeBody{
-					NodeID: cfg.NodeID,
-					Addr:   cfg.Addr,
-				})
-				if err != nil {
-					logger.Warn("node control-plane registration failed", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "error", err)
-					return nil
-				}
-				logger.Info("node registered with control-plane", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "revision", resp.Revision)
+				registerWithControl(ctx, logger, controlClient, cfg)
+				go runControlHeartbeat(ctx, logger, controlClient, cfg, heartbeatInterval)
 				return nil
 			}, dix.LifecycleName("node.control.register"), dix.LifecycleAfter("node.http.start")),
 		),
 	)
+}
+
+func registerWithControl(ctx context.Context, logger *slog.Logger, client *ControlClient, cfg Config) {
+	resp, err := client.RegisterNode(ctx, controlapi.RegisterNodeBody{
+		NodeID: cfg.NodeID,
+		Addr:   cfg.Addr,
+	})
+	if err != nil {
+		logger.Warn("node control-plane registration failed", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "error", err)
+		return
+	}
+	logger.Info("node registered with control-plane", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "revision", resp.Revision)
+}
+
+func runControlHeartbeat(ctx context.Context, logger *slog.Logger, client *ControlClient, cfg Config, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			resp, err := client.Heartbeat(ctx, controlapi.HeartbeatBody{
+				NodeID: cfg.NodeID,
+				Addr:   cfg.Addr,
+			})
+			if err != nil {
+				logger.Warn("node control-plane heartbeat failed", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "error", err)
+				continue
+			}
+			logger.Debug("node control-plane heartbeat sent", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "revision", resp.Revision)
+		}
+	}
 }
 
 func cacheKey(namespace, space, entity, key string) cache.Key {

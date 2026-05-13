@@ -48,6 +48,7 @@ Control-plane snapshot:
 ```bash
 curl http://127.0.0.1:7401/v1/control/state
 curl http://127.0.0.1:7401/v1/control/snapshot
+curl http://127.0.0.1:7401/v1/control/nodes
 curl http://127.0.0.1:7402/v1/frontend/routes
 ```
 
@@ -77,9 +78,9 @@ curl -X DELETE 'http://127.0.0.1:7402/v1/cache?namespace=order-service&space=ses
 Run a single component:
 
 ```bash
-go run ./cmd control
+go run ./cmd control --liveness-sweep-interval 5s --liveness-suspect-after 15s --liveness-dead-after 30s
 go run ./cmd frontend --node-addr 127.0.0.1:7403
-go run ./cmd node --control-addr 127.0.0.1:7401 --quota-space-memory-bytes 104857600
+go run ./cmd node --control-addr 127.0.0.1:7401 --heartbeat-interval 5s --quota-space-memory-bytes 104857600
 go run ./cmd admin
 ```
 
