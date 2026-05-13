@@ -80,24 +80,54 @@ func (c *RouteCache) Select(namespace, space string) (Route, bool) {
 	var wildcard *Route
 	for i := range c.routes {
 		route := &c.routes[i]
-		if route.Role != "data-node" || route.Addr == "" {
+		switch selectMatch(route, namespace, space) {
+		case exactRoute:
+			return *route, true
+		case namespaceRoute:
+			if namespaceMatch == nil {
+				namespaceMatch = route
+			}
+		case wildcardRoute:
+			if wildcard == nil {
+				wildcard = route
+			}
+		case noRoute:
+		}
+	}
+	return firstRoute(namespaceMatch, wildcard)
+}
+
+type routeMatch uint8
+
+const (
+	noRoute routeMatch = iota
+	exactRoute
+	namespaceRoute
+	wildcardRoute
+)
+
+func selectMatch(route *Route, namespace, space string) routeMatch {
+	if route.Role != "data-node" || route.Addr == "" {
+		return noRoute
+	}
+	if route.Namespace == namespace && route.Space == space {
+		return exactRoute
+	}
+	if route.Namespace == namespace && route.Space == "" {
+		return namespaceRoute
+	}
+	if route.Namespace == "" && route.Space == "" {
+		return wildcardRoute
+	}
+	return noRoute
+}
+
+func firstRoute(routes ...*Route) (Route, bool) {
+	for _, route := range routes {
+		if route == nil {
 			continue
 		}
-		if route.Namespace == namespace && route.Space == space {
-			return *route, true
-		}
-		if route.Namespace == namespace && route.Space == "" && namespaceMatch == nil {
-			namespaceMatch = route
-		}
-		if route.Namespace == "" && route.Space == "" && wildcard == nil {
-			wildcard = route
-		}
-	}
-	if namespaceMatch != nil {
-		return *namespaceMatch, true
-	}
-	if wildcard != nil {
-		return *wildcard, true
+		return *route, true
 	}
 	return Route{}, false
 }

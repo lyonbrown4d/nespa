@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	collectionmapping "github.com/arcgolabs/collectionx/mapping"
 	"github.com/lyonbrown4d/nespa/internal/controlapi"
 )
 
@@ -19,7 +20,7 @@ type ControlState struct {
 	mu        sync.RWMutex
 	clusterID string
 	revision  uint64
-	nodes     map[string]controlapi.NodeBody
+	nodes     *collectionmapping.Map[string, controlapi.NodeBody]
 	now       func() time.Time
 }
 
@@ -29,10 +30,17 @@ type LivenessResult struct {
 }
 
 func NewControlState(clusterID string) *ControlState {
+	return NewControlStateWithClock(clusterID, time.Now)
+}
+
+func NewControlStateWithClock(clusterID string, now func() time.Time) *ControlState {
+	if now == nil {
+		now = time.Now
+	}
 	return &ControlState{
 		clusterID: clusterID,
-		nodes:     make(map[string]controlapi.NodeBody),
-		now:       time.Now,
+		nodes:     collectionmapping.NewMap[string, controlapi.NodeBody](),
+		now:       now,
 	}
 }
 
@@ -47,11 +55,11 @@ func (s *ControlState) RegisterNode(nodeID, addr string) controlapi.RegisterNode
 		LastSeenUnix: s.now().Unix(),
 	}
 
-	previous, exists := s.nodes[nodeID]
+	previous, exists := s.nodes.Get(nodeID)
 	if !exists || previous.Addr != addr || previous.State != node.State {
 		s.revision++
 	}
-	s.nodes[nodeID] = node
+	s.nodes.Set(nodeID, node)
 
 	return controlapi.RegisterNodeResponse{
 		Revision: s.revision,
@@ -63,7 +71,7 @@ func (s *ControlState) Heartbeat(nodeID, addr string) controlapi.HeartbeatRespon
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	node, exists := s.nodes[nodeID]
+	node, exists := s.nodes.Get(nodeID)
 	if !exists {
 		node = controlapi.NodeBody{
 			NodeID: nodeID,
@@ -81,7 +89,7 @@ func (s *ControlState) Heartbeat(nodeID, addr string) controlapi.HeartbeatRespon
 		s.revision++
 	}
 	node.LastSeenUnix = s.now().Unix()
-	s.nodes[nodeID] = node
+	s.nodes.Set(nodeID, node)
 
 	return controlapi.HeartbeatResponse{
 		Revision: s.revision,
@@ -94,9 +102,9 @@ func (s *ControlState) AdvanceLiveness(now time.Time, suspectAfter, deadAfter ti
 	defer s.mu.Unlock()
 
 	var changed []controlapi.NodeBody
-	for nodeID, node := range s.nodes {
+	s.nodes.Range(func(nodeID string, node controlapi.NodeBody) bool {
 		if node.LastSeenUnix <= 0 {
-			continue
+			return true
 		}
 
 		nextState := node.State
@@ -110,13 +118,14 @@ func (s *ControlState) AdvanceLiveness(now time.Time, suspectAfter, deadAfter ti
 		}
 
 		if node.State == nextState {
-			continue
+			return true
 		}
 		node.State = nextState
-		s.nodes[nodeID] = node
+		s.nodes.Set(nodeID, node)
 		s.revision++
 		changed = append(changed, node)
-	}
+		return true
+	})
 
 	return LivenessResult{
 		Revision: s.revision,
@@ -173,10 +182,7 @@ func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 }
 
 func (s *ControlState) sortedNodesLocked() []controlapi.NodeBody {
-	nodes := make([]controlapi.NodeBody, 0, len(s.nodes))
-	for _, node := range s.nodes {
-		nodes = append(nodes, node)
-	}
+	nodes := s.nodes.Values()
 	sort.Slice(nodes, func(i, j int) bool {
 		return nodes[i].NodeID < nodes[j].NodeID
 	})

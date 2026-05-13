@@ -1,13 +1,14 @@
-package control
+package control_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/lyonbrown4d/nespa/internal/control"
 )
 
 func TestControlStateRegisterNodeBuildsSnapshotRoute(t *testing.T) {
-	state := NewControlState("test")
-	state.now = func() time.Time { return time.Unix(123, 0) }
+	state := control.NewControlStateWithClock("test", func() time.Time { return time.Unix(123, 0) })
 
 	first := state.RegisterNode("node-1", "127.0.0.1:7403")
 	if first.Revision != 1 {
@@ -35,23 +36,23 @@ func TestControlStateRegisterNodeBuildsSnapshotRoute(t *testing.T) {
 }
 
 func TestControlStateHeartbeatRegistersUnknownNode(t *testing.T) {
-	state := NewControlState("test")
+	state := control.NewControlState("test")
 	heartbeat := state.Heartbeat("node-2", "127.0.0.1:7503")
 
 	if heartbeat.Revision != 1 {
 		t.Fatalf("revision = %d, want 1", heartbeat.Revision)
 	}
-	if heartbeat.Node.State != nodeStateHealthy {
-		t.Fatalf("state = %q, want %q", heartbeat.Node.State, nodeStateHealthy)
+	if heartbeat.Node.State != "healthy" {
+		t.Fatalf("state = %q, want healthy", heartbeat.Node.State)
 	}
 }
 
 func TestControlStateHeartbeatDoesNotAdvanceRevisionForLivePing(t *testing.T) {
-	state := NewControlState("test")
-	state.now = func() time.Time { return time.Unix(10, 0) }
+	now := time.Unix(10, 0)
+	state := control.NewControlStateWithClock("test", func() time.Time { return now })
 	state.RegisterNode("node-1", "127.0.0.1:7403")
 
-	state.now = func() time.Time { return time.Unix(20, 0) }
+	now = time.Unix(20, 0)
 	heartbeat := state.Heartbeat("node-1", "127.0.0.1:7403")
 
 	if heartbeat.Revision != 1 {
@@ -67,15 +68,14 @@ func TestControlStateHeartbeatDoesNotAdvanceRevisionForLivePing(t *testing.T) {
 }
 
 func TestControlStateAdvanceLivenessTransitionsNodeState(t *testing.T) {
-	state := NewControlState("test")
-	state.now = func() time.Time { return time.Unix(10, 0) }
+	state := control.NewControlStateWithClock("test", func() time.Time { return time.Unix(10, 0) })
 	state.RegisterNode("node-1", "127.0.0.1:7403")
 
 	suspect := state.AdvanceLiveness(time.Unix(16, 0), 5*time.Second, 10*time.Second)
 	if suspect.Revision != 2 {
 		t.Fatalf("suspect revision = %d, want 2", suspect.Revision)
 	}
-	if len(suspect.Changed) != 1 || suspect.Changed[0].State != nodeStateSuspect {
+	if len(suspect.Changed) != 1 || suspect.Changed[0].State != "suspect" {
 		t.Fatalf("unexpected suspect changes: %+v", suspect.Changed)
 	}
 	if routes := state.Snapshot().Routes; len(routes) != 0 {
@@ -86,7 +86,7 @@ func TestControlStateAdvanceLivenessTransitionsNodeState(t *testing.T) {
 	if dead.Revision != 3 {
 		t.Fatalf("dead revision = %d, want 3", dead.Revision)
 	}
-	if len(dead.Changed) != 1 || dead.Changed[0].State != nodeStateDead {
+	if len(dead.Changed) != 1 || dead.Changed[0].State != "dead" {
 		t.Fatalf("unexpected dead changes: %+v", dead.Changed)
 	}
 
@@ -100,19 +100,19 @@ func TestControlStateAdvanceLivenessTransitionsNodeState(t *testing.T) {
 }
 
 func TestControlStateHeartbeatRecoversSuspectNode(t *testing.T) {
-	state := NewControlState("test")
-	state.now = func() time.Time { return time.Unix(10, 0) }
+	now := time.Unix(10, 0)
+	state := control.NewControlStateWithClock("test", func() time.Time { return now })
 	state.RegisterNode("node-1", "127.0.0.1:7403")
 	state.AdvanceLiveness(time.Unix(16, 0), 5*time.Second, 10*time.Second)
 
-	state.now = func() time.Time { return time.Unix(17, 0) }
+	now = time.Unix(17, 0)
 	heartbeat := state.Heartbeat("node-1", "127.0.0.1:7403")
 
 	if heartbeat.Revision != 3 {
 		t.Fatalf("revision = %d, want 3", heartbeat.Revision)
 	}
-	if heartbeat.Node.State != nodeStateHealthy {
-		t.Fatalf("node state = %q, want %q", heartbeat.Node.State, nodeStateHealthy)
+	if heartbeat.Node.State != "healthy" {
+		t.Fatalf("node state = %q, want healthy", heartbeat.Node.State)
 	}
 	if routes := state.Snapshot().Routes; len(routes) != 1 {
 		t.Fatalf("recovered node routes len = %d, want 1", len(routes))

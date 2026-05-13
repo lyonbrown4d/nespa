@@ -1,3 +1,4 @@
+// Package cacheapi defines shared cache API DTOs.
 package cacheapi
 
 type SetInput struct {

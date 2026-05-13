@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 	"time"
 
@@ -33,9 +34,7 @@ type HTTPService struct {
 
 func NewHTTPService(cfg HTTPConfig) *HTTPService {
 	metadata := make(map[string]string, len(cfg.Metadata))
-	for k, v := range cfg.Metadata {
-		metadata[k] = v
-	}
+	maps.Copy(metadata, cfg.Metadata)
 
 	return &HTTPService{
 		name:     cfg.Name,
@@ -55,6 +54,36 @@ func HTTPModule(cfg HTTPConfig) dix.Module {
 			dix.OnStop2[*slog.Logger, eventx.BusRuntime](func(ctx context.Context, logger *slog.Logger, bus eventx.BusRuntime) error {
 				return service.Stop(ctx, logger, bus)
 			}, dix.LifecycleName(cfg.Name+".http.stop")),
+		),
+	)
+}
+
+func ConfiguredHTTPModule[T any](name string, build func(T) HTTPConfig) dix.Module {
+	var mu sync.Mutex
+	var service *HTTPService
+
+	return dix.NewModule(name+".http",
+		dix.WithModuleHooks(
+			dix.OnStart3[T, *slog.Logger, eventx.BusRuntime](func(ctx context.Context, cfg T, logger *slog.Logger, bus eventx.BusRuntime) error {
+				next := NewHTTPService(build(cfg))
+
+				mu.Lock()
+				service = next
+				mu.Unlock()
+
+				return next.Start(ctx, logger, bus)
+			}, dix.LifecycleName(name+".http.start")),
+			dix.OnStop2[*slog.Logger, eventx.BusRuntime](func(ctx context.Context, logger *slog.Logger, bus eventx.BusRuntime) error {
+				mu.Lock()
+				current := service
+				service = nil
+				mu.Unlock()
+
+				if current == nil {
+					return nil
+				}
+				return current.Stop(ctx, logger, bus)
+			}, dix.LifecycleName(name+".http.stop")),
 		),
 	)
 }
@@ -90,7 +119,9 @@ func (s *HTTPService) Start(ctx context.Context, logger *slog.Logger, bus eventx
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("service starting", "service", s.name, "addr", s.addr)
-		_ = bus.Publish(ctx, ServiceEvent{Service: s.name, Addr: s.addr, State: "starting"})
+		if err := bus.Publish(ctx, ServiceEvent{Service: s.name, Addr: s.addr, State: "starting"}); err != nil {
+			logger.Warn("service start event failed", "service", s.name, "error", err)
+		}
 		if err := server.ListenAndServeContext(ctx, s.addr); err != nil && !errors.Is(err, context.Canceled) {
 			errCh <- err
 			return
@@ -109,7 +140,7 @@ func (s *HTTPService) Start(ctx context.Context, logger *slog.Logger, bus eventx
 		s.errCh = errCh
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("%s start canceled: %w", s.name, ctx.Err())
 	}
 }
 
@@ -132,11 +163,13 @@ func (s *HTTPService) Stop(ctx context.Context, logger *slog.Logger, bus eventx.
 	select {
 	case <-errCh:
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("%s stop canceled: %w", s.name, ctx.Err())
 	}
 
 	logger.Info("service stopped", "service", s.name)
-	_ = bus.Publish(context.Background(), ServiceEvent{Service: s.name, Addr: s.addr, State: "stopped"})
+	if err := bus.Publish(ctx, ServiceEvent{Service: s.name, Addr: s.addr, State: "stopped"}); err != nil {
+		logger.Warn("service stop event failed", "service", s.name, "error", err)
+	}
 	return nil
 }
 

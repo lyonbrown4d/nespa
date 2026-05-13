@@ -1,18 +1,20 @@
-package engine
+package engine_test
 
 import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/lyonbrown4d/nespa/internal/node/engine"
 )
 
 func TestMemoryEngineSetGetCopiesValue(t *testing.T) {
-	eng := NewMemory(Config{ShardCount: 4})
-	defer eng.Close()
-	key := Key{Namespace: "order", Space: "session", Key: "k1"}
+	eng := engine.NewMemory(engine.Config{ShardCount: 4})
+	defer closeEngine(t, eng)
+	key := engine.Key{Namespace: "order", Space: "session", Key: "k1"}
 	value := []byte("first")
 
-	rec, err := eng.Set(context.Background(), key, value, SetOptions{})
+	rec, err := eng.Set(context.Background(), key, value, engine.SetOptions{})
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -21,7 +23,7 @@ func TestMemoryEngineSetGetCopiesValue(t *testing.T) {
 	}
 
 	value[0] = 'x'
-	got, ok, err := eng.Get(context.Background(), key, GetOptions{})
+	got, ok, err := eng.Get(context.Background(), key, engine.GetOptions{})
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -33,7 +35,7 @@ func TestMemoryEngineSetGetCopiesValue(t *testing.T) {
 	}
 
 	got.Value[0] = 'y'
-	again, ok, err := eng.Get(context.Background(), key, GetOptions{})
+	again, ok, err := eng.Get(context.Background(), key, engine.GetOptions{})
 	if err != nil {
 		t.Fatalf("get again: %v", err)
 	}
@@ -43,22 +45,21 @@ func TestMemoryEngineSetGetCopiesValue(t *testing.T) {
 }
 
 func TestMemoryEngineTTL(t *testing.T) {
-	eng := NewMemory(Config{ShardCount: 2})
-	defer eng.Close()
 	now := time.UnixMilli(1000)
-	eng.now = func() time.Time { return now }
+	eng := engine.NewMemory(engine.Config{ShardCount: 2, Now: func() time.Time { return now }})
+	defer closeEngine(t, eng)
 
-	key := Key{Namespace: "order", Space: "session", Key: "k1"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), SetOptions{TTL: time.Second}); err != nil {
+	key := engine.Key{Namespace: "order", Space: "session", Key: "k1"}
+	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{TTL: time.Second}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
-	if _, ok, err := eng.Get(context.Background(), key, GetOptions{}); err != nil || !ok {
+	if _, ok, err := eng.Get(context.Background(), key, engine.GetOptions{}); err != nil || !ok {
 		t.Fatalf("get before ttl: ok=%v err=%v", ok, err)
 	}
 
 	now = now.Add(time.Second)
-	if _, ok, err := eng.Get(context.Background(), key, GetOptions{}); err != nil || ok {
+	if _, ok, err := eng.Get(context.Background(), key, engine.GetOptions{}); err != nil || ok {
 		t.Fatalf("get after ttl: ok=%v err=%v", ok, err)
 	}
 
@@ -72,32 +73,32 @@ func TestMemoryEngineTTL(t *testing.T) {
 }
 
 func TestMemoryEngineVersionVisibility(t *testing.T) {
-	eng := NewMemory(Config{})
-	defer eng.Close()
-	key := Key{Namespace: "order", Space: "view", Key: "k1"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), SetOptions{
+	eng := engine.NewMemory(engine.Config{})
+	defer closeEngine(t, eng)
+	key := engine.Key{Namespace: "order", Space: "view", Key: "k1"}
+	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{
 		NamespaceVersion: 2,
 		SpaceVersion:     5,
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
-	if _, ok, err := eng.Get(context.Background(), key, GetOptions{NamespaceVersion: 1}); err != nil || ok {
+	if _, ok, err := eng.Get(context.Background(), key, engine.GetOptions{NamespaceVersion: 1}); err != nil || ok {
 		t.Fatalf("namespace version mismatch: ok=%v err=%v", ok, err)
 	}
-	if _, ok, err := eng.Get(context.Background(), key, GetOptions{SpaceVersion: 4}); err != nil || ok {
+	if _, ok, err := eng.Get(context.Background(), key, engine.GetOptions{SpaceVersion: 4}); err != nil || ok {
 		t.Fatalf("space version mismatch: ok=%v err=%v", ok, err)
 	}
-	if _, ok, err := eng.Get(context.Background(), key, GetOptions{NamespaceVersion: 2, SpaceVersion: 5}); err != nil || !ok {
+	if _, ok, err := eng.Get(context.Background(), key, engine.GetOptions{NamespaceVersion: 2, SpaceVersion: 5}); err != nil || !ok {
 		t.Fatalf("version match: ok=%v err=%v", ok, err)
 	}
 }
 
 func TestMemoryEngineDeleteAndStats(t *testing.T) {
-	eng := NewMemory(Config{ShardCount: 4})
-	defer eng.Close()
-	key := Key{Namespace: "order", Space: "session", Key: "k1"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), SetOptions{}); err != nil {
+	eng := engine.NewMemory(engine.Config{ShardCount: 4})
+	defer closeEngine(t, eng)
+	key := engine.Key{Namespace: "order", Space: "session", Key: "k1"}
+	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	if stats, err := eng.Stats(context.Background()); err != nil || stats.Objects != 1 || stats.MemoryBytes == 0 {
@@ -117,16 +118,16 @@ func TestMemoryEngineDeleteAndStats(t *testing.T) {
 }
 
 func TestMemoryEngineStatsIncludesSpaceUsage(t *testing.T) {
-	eng := NewMemory(Config{ShardCount: 4})
-	defer eng.Close()
+	eng := engine.NewMemory(engine.Config{ShardCount: 4})
+	defer closeEngine(t, eng)
 
-	keyA := Key{Namespace: "order", Space: "session", Key: "a"}
-	keyB := Key{Namespace: "order", Space: "view", Key: "b"}
+	keyA := engine.Key{Namespace: "order", Space: "session", Key: "a"}
+	keyB := engine.Key{Namespace: "order", Space: "view", Key: "b"}
 
-	if _, err := eng.Set(context.Background(), keyA, []byte("one"), SetOptions{}); err != nil {
+	if _, err := eng.Set(context.Background(), keyA, []byte("one"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set a: %v", err)
 	}
-	if _, err := eng.Set(context.Background(), keyB, []byte("two"), SetOptions{}); err != nil {
+	if _, err := eng.Set(context.Background(), keyB, []byte("two"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set b: %v", err)
 	}
 
@@ -137,37 +138,31 @@ func TestMemoryEngineStatsIncludesSpaceUsage(t *testing.T) {
 	if len(stats.Spaces) != 2 {
 		t.Fatalf("spaces len = %d, want 2: %+v", len(stats.Spaces), stats.Spaces)
 	}
-	if stats.Spaces[0].Namespace != "order" || stats.Spaces[0].Space != "session" || stats.Spaces[0].Objects != 1 {
-		t.Fatalf("first space = %+v", stats.Spaces[0])
-	}
-	if stats.Spaces[1].Namespace != "order" || stats.Spaces[1].Space != "view" || stats.Spaces[1].Objects != 1 {
-		t.Fatalf("second space = %+v", stats.Spaces[1])
-	}
+	assertSpaceStat(t, stats.Spaces[0], "order", "session")
+	assertSpaceStat(t, stats.Spaces[1], "order", "view")
 }
 
 func TestMemoryEngineEvictsScopedLRU(t *testing.T) {
-	eng := NewMemory(Config{ShardCount: 1})
-	defer eng.Close()
-
 	now := time.UnixMilli(1000)
-	eng.now = func() time.Time { return now }
+	eng := engine.NewMemory(engine.Config{ShardCount: 1, Now: func() time.Time { return now }})
+	defer closeEngine(t, eng)
 
-	oldKey := Key{Namespace: "n", Space: "s", Key: "old"}
-	newKey := Key{Namespace: "n", Space: "s", Key: "new"}
-	otherKey := Key{Namespace: "n", Space: "other", Key: "other"}
+	oldKey := engine.Key{Namespace: "n", Space: "s", Key: "old"}
+	newKey := engine.Key{Namespace: "n", Space: "s", Key: "new"}
+	otherKey := engine.Key{Namespace: "n", Space: "other", Key: "other"}
 
-	if _, err := eng.Set(context.Background(), oldKey, []byte("old-value"), SetOptions{}); err != nil {
+	if _, err := eng.Set(context.Background(), oldKey, []byte("old-value"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set old: %v", err)
 	}
 	now = now.Add(time.Second)
-	if _, err := eng.Set(context.Background(), newKey, []byte("new-value"), SetOptions{}); err != nil {
+	if _, err := eng.Set(context.Background(), newKey, []byte("new-value"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set new: %v", err)
 	}
-	if _, err := eng.Set(context.Background(), otherKey, []byte("other-value"), SetOptions{}); err != nil {
+	if _, err := eng.Set(context.Background(), otherKey, []byte("other-value"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set other: %v", err)
 	}
 
-	result, err := eng.Evict(context.Background(), EvictOptions{
+	result, err := eng.Evict(context.Background(), engine.EvictOptions{
 		Namespace:   "n",
 		Space:       "s",
 		TargetBytes: engineCostForTest(oldKey, []byte("old-value")),
@@ -178,17 +173,41 @@ func TestMemoryEngineEvictsScopedLRU(t *testing.T) {
 	if result.EvictedObjects != 1 {
 		t.Fatalf("evicted objects = %d, want 1", result.EvictedObjects)
 	}
-	if _, ok, err := eng.Get(context.Background(), oldKey, GetOptions{}); err != nil || ok {
-		t.Fatalf("old key after evict: ok=%v err=%v", ok, err)
-	}
-	if _, ok, err := eng.Get(context.Background(), newKey, GetOptions{}); err != nil || !ok {
-		t.Fatalf("new key after evict: ok=%v err=%v", ok, err)
-	}
-	if _, ok, err := eng.Get(context.Background(), otherKey, GetOptions{}); err != nil || !ok {
-		t.Fatalf("other key after evict: ok=%v err=%v", ok, err)
+	requireEngineMissing(t, eng, oldKey, "old key after evict")
+	requireEngineFound(t, eng, newKey, "new key after evict")
+	requireEngineFound(t, eng, otherKey, "other key after evict")
+}
+
+func engineCostForTest(key engine.Key, value []byte) uint64 {
+	return engine.EstimateCost(key, value)
+}
+
+func closeEngine(t *testing.T, eng *engine.MemoryEngine) {
+	t.Helper()
+	if err := eng.Close(); err != nil {
+		t.Fatalf("close engine: %v", err)
 	}
 }
 
-func engineCostForTest(key Key, value []byte) uint64 {
-	return EstimateCost(key, value)
+func assertSpaceStat(t *testing.T, stat engine.SpaceStats, namespace, space string) {
+	t.Helper()
+	if stat.Namespace != namespace || stat.Space != space || stat.Objects != 1 {
+		t.Fatalf("space stat = %+v, want %s/%s with 1 object", stat, namespace, space)
+	}
+}
+
+func requireEngineMissing(t *testing.T, eng engine.Engine, key engine.Key, name string) {
+	t.Helper()
+	_, ok, err := eng.Get(context.Background(), key, engine.GetOptions{})
+	if err != nil || ok {
+		t.Fatalf("%s: ok=%v err=%v", name, ok, err)
+	}
+}
+
+func requireEngineFound(t *testing.T, eng engine.Engine, key engine.Key, name string) {
+	t.Helper()
+	_, ok, err := eng.Get(context.Background(), key, engine.GetOptions{})
+	if err != nil || !ok {
+		t.Fatalf("%s: ok=%v err=%v", name, ok, err)
+	}
 }

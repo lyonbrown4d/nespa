@@ -3,8 +3,8 @@
 Nespa is a namespace-native, space-isolated, queryable distributed cache platform.
 
 This repository currently contains the first runnable scaffold: a Cobra-powered
-Go command with separate modes for the control plane, frontend, data node, admin
-API, and local development.
+Go command that starts the control plane, frontend, data node, and admin API as
+one local server.
 
 The scaffold follows the design document's foundation-package direction:
 
@@ -15,14 +15,15 @@ The scaffold follows the design document's foundation-package direction:
 - `github.com/arcgolabs/eventx` for in-process lifecycle events
 - `github.com/spf13/cobra` for the command tree
 
-The `cmd` package owns the Cobra command tree and directly assembles the `dix`
-application. Control, frontend, data node, and admin are modeled as `dix.Module`
-values whose HTTP servers start and stop through lifecycle hooks.
+The `cmd` package owns CLI flags and assembles the `dix` application. Config is
+loaded through a `dix` provider, then injected into control, frontend, data node,
+and admin modules. Each component is modeled as a `dix.Module` whose HTTP server
+starts and stops through lifecycle hooks.
 
 ## Run
 
 ```bash
-go run ./cmd dev
+go run ./cmd
 ```
 
 Default local endpoints:
@@ -75,16 +76,42 @@ curl 'http://127.0.0.1:7402/v1/cache?namespace=order-service&space=session&key=u
 curl -X DELETE 'http://127.0.0.1:7402/v1/cache?namespace=order-service&space=session&key=u1'
 ```
 
-Run a single component:
+Useful startup flags:
 
 ```bash
-go run ./cmd control --liveness-sweep-interval 5s --liveness-suspect-after 15s --liveness-dead-after 30s
-go run ./cmd frontend --node-addr 127.0.0.1:7403
-go run ./cmd node --control-addr 127.0.0.1:7401 --heartbeat-interval 5s --quota-space-memory-bytes 104857600
-go run ./cmd admin
+go run ./cmd \
+  --control-addr 127.0.0.1:7401 \
+  --control-cluster-id local \
+  --frontend-addr 127.0.0.1:7402 \
+  --node-addr 127.0.0.1:7403 \
+  --node-id node-1 \
+  --admin-addr 127.0.0.1:7404
 ```
 
 Quota flags use bytes. A value of `0` disables that limit.
+
+## Data Protocol
+
+The data plane is moving toward a TCP framed protocol. HTTP remains for admin,
+debug, health, and console APIs.
+
+The current frame header is fixed-width and big-endian:
+
+```text
+magic        uint32  "NSPA"
+version      uint8
+flags        uint8
+op           uint16
+request_id   uint64
+route_epoch  uint64
+metadata_len uint32
+payload_len  uint32
+metadata     []byte
+payload      []byte
+```
+
+`metadata` is opaque protocol metadata for now, while `payload` is raw binary
+cache value bytes. The codec lives in `internal/protocol`.
 
 ## Verify
 

@@ -1,4 +1,4 @@
-package node
+package node_test
 
 import (
 	"context"
@@ -8,54 +8,15 @@ import (
 	"testing"
 
 	"github.com/lyonbrown4d/nespa/internal/controlapi"
+	"github.com/lyonbrown4d/nespa/internal/node"
 )
 
 func TestControlClientRegisterAndHeartbeat(t *testing.T) {
 	var seen []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.Method+" "+r.URL.Path)
-		w.Header().Set("content-type", "application/json")
-
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/control/nodes":
-			var body controlapi.RegisterNodeBody
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode register body: %v", err)
-			}
-			if body.NodeID != "node-1" || body.Addr != "127.0.0.1:7403" {
-				t.Fatalf("unexpected register body: %+v", body)
-			}
-			writeControlJSON(t, w, controlapi.RegisterNodeResponse{
-				Revision: 1,
-				Node: controlapi.NodeBody{
-					NodeID: body.NodeID,
-					Addr:   body.Addr,
-					State:  "healthy",
-				},
-			})
-		case r.Method == http.MethodPut && r.URL.Path == "/v1/control/nodes/heartbeat":
-			var body controlapi.HeartbeatBody
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode heartbeat body: %v", err)
-			}
-			if body.NodeID != "node-1" || body.Addr != "127.0.0.1:7403" {
-				t.Fatalf("unexpected heartbeat body: %+v", body)
-			}
-			writeControlJSON(t, w, controlapi.HeartbeatResponse{
-				Revision: 1,
-				Node: controlapi.NodeBody{
-					NodeID: body.NodeID,
-					Addr:   body.Addr,
-					State:  "healthy",
-				},
-			})
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
+	server := newControlClientTestServer(t, &seen)
 	defer server.Close()
 
-	client := NewControlClient(server.URL)
+	client := node.NewControlClient(server.URL)
 	ctx := context.Background()
 
 	register, err := client.RegisterNode(ctx, controlapi.RegisterNodeBody{NodeID: "node-1", Addr: "127.0.0.1:7403"})
@@ -74,7 +35,69 @@ func TestControlClientRegisterAndHeartbeat(t *testing.T) {
 		t.Fatalf("unexpected heartbeat response: %+v", heartbeat)
 	}
 
-	want := []string{"POST /v1/control/nodes", "PUT /v1/control/nodes/heartbeat"}
+	assertSeenRequests(t, seen, []string{"POST /v1/control/nodes", "PUT /v1/control/nodes/heartbeat"})
+}
+
+func newControlClientTestServer(t *testing.T, seen *[]string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*seen = append(*seen, r.Method+" "+r.URL.Path)
+		w.Header().Set("content-type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/control/nodes":
+			handleRegister(t, w, r)
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/control/nodes/heartbeat":
+			handleHeartbeat(t, w, r)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+}
+
+func handleRegister(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	var body controlapi.RegisterNodeBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Fatalf("decode register body: %v", err)
+	}
+	assertNodeIdentity(t, body.NodeID, body.Addr)
+	writeControlJSON(t, w, controlapi.RegisterNodeResponse{
+		Revision: 1,
+		Node:     healthyNode(body.NodeID, body.Addr),
+	})
+}
+
+func handleHeartbeat(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	var body controlapi.HeartbeatBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Fatalf("decode heartbeat body: %v", err)
+	}
+	assertNodeIdentity(t, body.NodeID, body.Addr)
+	writeControlJSON(t, w, controlapi.HeartbeatResponse{
+		Revision: 1,
+		Node:     healthyNode(body.NodeID, body.Addr),
+	})
+}
+
+func assertNodeIdentity(t *testing.T, nodeID, addr string) {
+	t.Helper()
+	if nodeID != "node-1" || addr != "127.0.0.1:7403" {
+		t.Fatalf("unexpected node identity: %s %s", nodeID, addr)
+	}
+}
+
+func healthyNode(nodeID, addr string) controlapi.NodeBody {
+	return controlapi.NodeBody{
+		NodeID: nodeID,
+		Addr:   addr,
+		State:  "healthy",
+	}
+}
+
+func assertSeenRequests(t *testing.T, seen, want []string) {
+	t.Helper()
 	for i, item := range want {
 		if seen[i] != item {
 			t.Fatalf("seen[%d] = %q, want %q", i, seen[i], item)

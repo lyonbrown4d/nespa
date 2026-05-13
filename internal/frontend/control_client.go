@@ -1,8 +1,11 @@
+// Package frontend implements the Nespa request gateway.
 package frontend
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -25,28 +28,36 @@ func NewControlClient(addr string) *ControlClient {
 	}
 }
 
-func (c *ControlClient) Snapshot(ctx context.Context) (controlapi.SnapshotBody, error) {
-	var zero controlapi.SnapshotBody
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/control/snapshot", nil)
+func (c *ControlClient) Snapshot(ctx context.Context) (out controlapi.SnapshotBody, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/control/snapshot", http.NoBody)
 	if err != nil {
-		return zero, httpx.NewError(http.StatusBadGateway, "invalid control-plane request", err)
+		return out, httpx.NewError(http.StatusBadGateway, "invalid control-plane request", err)
 	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return zero, httpx.NewError(http.StatusBadGateway, "control-plane request failed", err)
+		return out, httpx.NewError(http.StatusBadGateway, "control-plane request failed", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err = closeResponseBody(resp.Body, err)
+	}()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return zero, httpx.NewError(resp.StatusCode, "control-plane snapshot failed")
+		return out, httpx.NewError(resp.StatusCode, "control-plane snapshot failed")
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&zero); err != nil {
-		return zero, httpx.NewError(http.StatusBadGateway, "decode control-plane snapshot", err)
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return out, httpx.NewError(http.StatusBadGateway, "decode control-plane snapshot", err)
 	}
-	return zero, nil
+	return out, nil
 }
 
 func hasAddress(addr string) bool {
 	return strings.TrimSpace(addr) != ""
+}
+
+func closeResponseBody(body io.Closer, err error) error {
+	if closeErr := body.Close(); closeErr != nil && err == nil {
+		return fmt.Errorf("close response body: %w", closeErr)
+	}
+	return err
 }

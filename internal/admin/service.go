@@ -1,3 +1,4 @@
+// Package admin exposes the Nespa administrative HTTP API.
 package admin
 
 import (
@@ -20,23 +21,25 @@ type SummaryBody struct {
 	Nodes       uint64 `json:"nodes"`
 }
 
-func Module(cfg Config) dix.Module {
-	return runtime.HTTPModule(runtime.HTTPConfig{
-		Name: "admin",
-		Addr: cfg.Addr,
-		Metadata: map[string]string{
-			"control_addr": cfg.ControlAddr,
-			"role":         "admin-api",
-		},
-		Routes: func(server httpx.ServerRuntime) {
-			httpx.MustGet(server, "/v1/admin/summary", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[SummaryBody], error) {
-				return runtime.JSON(SummaryBody{
-					ControlAddr: cfg.ControlAddr,
-					Namespaces:  0,
-					Spaces:      0,
-					Nodes:       0,
-				}), nil
-			})
-		},
+func Module() dix.Module {
+	return runtime.ConfiguredHTTPModule[Config]("admin", func(cfg Config) runtime.HTTPConfig {
+		return runtime.HTTPConfig{
+			Name: "admin",
+			Addr: cfg.Addr,
+			Metadata: map[string]string{
+				"control_addr": cfg.ControlAddr,
+				"role":         "admin-api",
+			},
+			Routes: func(server httpx.ServerRuntime) {
+				httpx.MustGet(server, "/v1/admin/summary", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[SummaryBody], error) {
+					return runtime.JSON(SummaryBody{
+						ControlAddr: cfg.ControlAddr,
+						Namespaces:  0,
+						Spaces:      0,
+						Nodes:       0,
+					}), nil
+				})
+			},
+		}
 	})
 }

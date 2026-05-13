@@ -1,3 +1,4 @@
+// Package controlapi defines shared control-plane API DTOs.
 package controlapi
 
 type StateBody struct {

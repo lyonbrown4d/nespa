@@ -1,3 +1,4 @@
+// Package runtime contains shared Nespa runtime helpers.
 package runtime
 
 type EmptyInput struct{}

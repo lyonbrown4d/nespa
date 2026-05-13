@@ -1,13 +1,14 @@
-package frontend
+package frontend_test
 
 import (
 	"testing"
 
 	"github.com/lyonbrown4d/nespa/internal/controlapi"
+	"github.com/lyonbrown4d/nespa/internal/frontend"
 )
 
 func TestRouteCacheSelectPrefersExactThenNamespaceThenWildcard(t *testing.T) {
-	cache := NewRouteCache("test", []Route{
+	cache := frontend.NewRouteCache("test", []frontend.Route{
 		{Role: "data-node", Addr: "wildcard"},
 		{Namespace: "orders", Role: "data-node", Addr: "namespace"},
 		{Namespace: "orders", Space: "session", Role: "data-node", Addr: "exact"},
@@ -30,7 +31,7 @@ func TestRouteCacheSelectPrefersExactThenNamespaceThenWildcard(t *testing.T) {
 }
 
 func TestRouteCacheUpdateFromSnapshot(t *testing.T) {
-	cache := NewRouteCache("bootstrap", []Route{{Role: "data-node", Addr: "bootstrap"}})
+	cache := frontend.NewRouteCache("bootstrap", []frontend.Route{{Role: "data-node", Addr: "bootstrap"}})
 	updated := cache.UpdateFromSnapshot(controlapi.SnapshotBody{
 		Revision: 7,
 		Routes: []controlapi.RouteBody{
@@ -51,7 +52,7 @@ func TestRouteCacheUpdateFromSnapshot(t *testing.T) {
 }
 
 func TestRouteCacheIgnoresInitialEmptySnapshotRoutes(t *testing.T) {
-	cache := NewRouteCache("bootstrap", []Route{{Role: "data-node", Addr: "bootstrap"}})
+	cache := frontend.NewRouteCache("bootstrap", []frontend.Route{{Role: "data-node", Addr: "bootstrap"}})
 	updated := cache.UpdateFromSnapshot(controlapi.SnapshotBody{Revision: 0}, "control")
 	if updated {
 		t.Fatal("expected initial empty snapshot to be ignored")
@@ -64,7 +65,7 @@ func TestRouteCacheIgnoresInitialEmptySnapshotRoutes(t *testing.T) {
 }
 
 func TestRouteCacheAppliesRevisedEmptySnapshotRoutes(t *testing.T) {
-	cache := NewRouteCache("bootstrap", []Route{{Role: "data-node", Addr: "bootstrap"}})
+	cache := frontend.NewRouteCache("bootstrap", []frontend.Route{{Role: "data-node", Addr: "bootstrap"}})
 	updated := cache.UpdateFromSnapshot(controlapi.SnapshotBody{Revision: 8}, "control")
 	if !updated {
 		t.Fatal("expected revised empty snapshot to be applied")

@@ -1,4 +1,4 @@
-package frontend
+package frontend_test
 
 import (
 	"context"
@@ -8,57 +8,15 @@ import (
 	"testing"
 
 	"github.com/lyonbrown4d/nespa/internal/cacheapi"
+	"github.com/lyonbrown4d/nespa/internal/frontend"
 )
 
 func TestNodeClientSetGetDelete(t *testing.T) {
 	var seen []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != nodeCachePath {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		seen = append(seen, r.Method)
-		w.Header().Set("content-type", "application/json")
-
-		switch r.Method {
-		case http.MethodPut:
-			var body cacheapi.SetBody
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode set body: %v", err)
-			}
-			if body.Namespace != "ns" || body.Space != "sp" || body.Key != "k" || body.Value != "v" {
-				t.Fatalf("unexpected set body: %+v", body)
-			}
-			writeJSON(t, w, cacheapi.RecordBody{
-				Found:     true,
-				Namespace: body.Namespace,
-				Space:     body.Space,
-				Key:       body.Key,
-				Value:     body.Value,
-				Version:   1,
-			})
-		case http.MethodGet:
-			if got := r.URL.Query().Get("namespace"); got != "ns" {
-				t.Fatalf("unexpected get namespace: %q", got)
-			}
-			if got := r.URL.Query().Get("space"); got != "sp" {
-				t.Fatalf("unexpected get space: %q", got)
-			}
-			if got := r.URL.Query().Get("key"); got != "k" {
-				t.Fatalf("unexpected get key: %q", got)
-			}
-			writeJSON(t, w, cacheapi.RecordBody{Found: true, Value: "v"})
-		case http.MethodDelete:
-			if got := r.URL.Query().Get("key"); got != "k" {
-				t.Fatalf("unexpected delete key: %q", got)
-			}
-			writeJSON(t, w, cacheapi.DeleteBody{Deleted: true})
-		default:
-			t.Fatalf("unexpected method: %s", r.Method)
-		}
-	}))
+	server := newNodeClientTestServer(t, &seen)
 	defer server.Close()
 
-	client := NewNodeClient()
+	client := frontend.NewNodeClient()
 	ctx := context.Background()
 
 	set, err := client.Set(ctx, server.URL, cacheapi.SetBody{Namespace: "ns", Space: "sp", Key: "k", Value: "v"})
@@ -85,7 +43,78 @@ func TestNodeClientSetGetDelete(t *testing.T) {
 		t.Fatalf("unexpected delete response: %+v", del)
 	}
 
-	want := []string{http.MethodPut, http.MethodGet, http.MethodDelete}
+	assertSeenMethods(t, seen, []string{http.MethodPut, http.MethodGet, http.MethodDelete})
+}
+
+func newNodeClientTestServer(t *testing.T, seen *[]string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/node/cache" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		*seen = append(*seen, r.Method)
+		w.Header().Set("content-type", "application/json")
+
+		switch r.Method {
+		case http.MethodPut:
+			handleSetRequest(t, w, r)
+		case http.MethodGet:
+			handleGetRequest(t, w, r)
+		case http.MethodDelete:
+			handleDeleteRequest(t, w, r)
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+}
+
+func handleSetRequest(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	var body cacheapi.SetBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Fatalf("decode set body: %v", err)
+	}
+	assertSetBody(t, body)
+	writeJSON(t, w, cacheapi.RecordBody{
+		Found:     true,
+		Namespace: body.Namespace,
+		Space:     body.Space,
+		Key:       body.Key,
+		Value:     body.Value,
+		Version:   1,
+	})
+}
+
+func handleGetRequest(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	assertQueryValue(t, r, "namespace", "ns")
+	assertQueryValue(t, r, "space", "sp")
+	assertQueryValue(t, r, "key", "k")
+	writeJSON(t, w, cacheapi.RecordBody{Found: true, Value: "v"})
+}
+
+func handleDeleteRequest(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	assertQueryValue(t, r, "key", "k")
+	writeJSON(t, w, cacheapi.DeleteBody{Deleted: true})
+}
+
+func assertSetBody(t *testing.T, body cacheapi.SetBody) {
+	t.Helper()
+	if body.Namespace != "ns" || body.Space != "sp" || body.Key != "k" || body.Value != "v" {
+		t.Fatalf("unexpected set body: %+v", body)
+	}
+}
+
+func assertQueryValue(t *testing.T, r *http.Request, name, want string) {
+	t.Helper()
+	if got := r.URL.Query().Get(name); got != want {
+		t.Fatalf("unexpected %s query: %q", name, got)
+	}
+}
+
+func assertSeenMethods(t *testing.T, seen, want []string) {
+	t.Helper()
 	for i, method := range want {
 		if seen[i] != method {
 			t.Fatalf("method[%d] = %s, want %s", i, seen[i], method)

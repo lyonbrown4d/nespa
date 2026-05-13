@@ -80,20 +80,15 @@ func cacheDeleteQuery(input cacheapi.DeleteInput) url.Values {
 	return values
 }
 
-func doJSON[T any](ctx context.Context, client *http.Client, method, target string, body any) (T, error) {
-	var zero T
-	var reader io.Reader
-	if body != nil {
-		payload, err := json.Marshal(body)
-		if err != nil {
-			return zero, fmt.Errorf("encode node request: %w", err)
-		}
-		reader = bytes.NewReader(payload)
+func doJSON[T any](ctx context.Context, client *http.Client, method, target string, body any) (out T, err error) {
+	reader, err := requestBody(body)
+	if err != nil {
+		return out, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, target, reader)
 	if err != nil {
-		return zero, httpx.NewError(http.StatusBadGateway, "invalid data-node request", err)
+		return out, httpx.NewError(http.StatusBadGateway, "invalid data-node request", err)
 	}
 	if body != nil {
 		req.Header.Set("content-type", "application/json")
@@ -101,17 +96,40 @@ func doJSON[T any](ctx context.Context, client *http.Client, method, target stri
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return zero, httpx.NewError(http.StatusBadGateway, "data-node request failed", err)
+		return out, httpx.NewError(http.StatusBadGateway, "data-node request failed", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err = closeResponseBody(resp.Body, err)
+	}()
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return zero, httpx.NewError(resp.StatusCode, "data-node request failed", fmt.Errorf("%s", strings.TrimSpace(string(raw))))
+	if err := checkNodeResponse(resp); err != nil {
+		return out, err
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&zero); err != nil {
-		return zero, httpx.NewError(http.StatusBadGateway, "decode data-node response", err)
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return out, httpx.NewError(http.StatusBadGateway, "decode data-node response", err)
 	}
-	return zero, nil
+	return out, nil
+}
+
+func requestBody(body any) (io.Reader, error) {
+	if body == nil {
+		return http.NoBody, nil
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode node request: %w", err)
+	}
+	return bytes.NewReader(payload), nil
+}
+
+func checkNodeResponse(resp *http.Response) error {
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		return nil
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return httpx.NewError(resp.StatusCode, "read data-node error response", err)
+	}
+	return httpx.NewError(resp.StatusCode, "data-node request failed", fmt.Errorf("%s", strings.TrimSpace(string(raw))))
 }

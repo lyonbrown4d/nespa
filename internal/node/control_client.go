@@ -1,3 +1,4 @@
+// Package node implements the Nespa data-node service.
 package node
 
 import (
@@ -47,31 +48,42 @@ func normalizeBaseURL(addr string) string {
 	return strings.TrimRight(addr, "/")
 }
 
-func controlDoJSON[T any](ctx context.Context, client *http.Client, method, target string, body any) (T, error) {
-	var zero T
+func controlDoJSON[T any](ctx context.Context, client *http.Client, method, target string, body any) (out T, err error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return zero, fmt.Errorf("encode control request: %w", err)
+		return out, fmt.Errorf("encode control request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(payload))
 	if err != nil {
-		return zero, httpx.NewError(http.StatusBadGateway, "invalid control-plane request", err)
+		return out, httpx.NewError(http.StatusBadGateway, "invalid control-plane request", err)
 	}
 	req.Header.Set("content-type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return zero, httpx.NewError(http.StatusBadGateway, "control-plane request failed", err)
+		return out, httpx.NewError(http.StatusBadGateway, "control-plane request failed", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err = closeResponseBody(resp.Body, err)
+	}()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return zero, httpx.NewError(resp.StatusCode, "control-plane request failed", fmt.Errorf("%s", strings.TrimSpace(string(raw))))
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return out, httpx.NewError(resp.StatusCode, "read control-plane error response", readErr)
+		}
+		return out, httpx.NewError(resp.StatusCode, "control-plane request failed", fmt.Errorf("%s", strings.TrimSpace(string(raw))))
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&zero); err != nil {
-		return zero, httpx.NewError(http.StatusBadGateway, "decode control-plane response", err)
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return out, httpx.NewError(http.StatusBadGateway, "decode control-plane response", err)
 	}
-	return zero, nil
+	return out, nil
+}
+
+func closeResponseBody(body io.Closer, err error) error {
+	if closeErr := body.Close(); closeErr != nil && err == nil {
+		return fmt.Errorf("close response body: %w", closeErr)
+	}
+	return err
 }
