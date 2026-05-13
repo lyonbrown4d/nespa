@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/arcgolabs/httpx"
-	"github.com/lyonbrown4d/nespa/internal/cacheapi"
+	"github.com/lyonbrown4d/nespa/cacheapi"
 )
 
 const nodeCachePath = "/v1/node/cache"

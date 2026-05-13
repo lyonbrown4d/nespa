@@ -3,7 +3,7 @@ package frontend
 import (
 	"sync"
 
-	"github.com/lyonbrown4d/nespa/internal/controlapi"
+	"github.com/lyonbrown4d/nespa/controlapi"
 )
 
 type Route struct {

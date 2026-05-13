@@ -6,7 +6,7 @@ import (
 	"time"
 
 	collectionmapping "github.com/arcgolabs/collectionx/mapping"
-	"github.com/lyonbrown4d/nespa/internal/controlapi"
+	"github.com/lyonbrown4d/nespa/controlapi"
 )
 
 const (

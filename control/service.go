@@ -6,10 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/httpx"
-	"github.com/lyonbrown4d/nespa/internal/controlapi"
-	"github.com/lyonbrown4d/nespa/internal/runtime"
+	"github.com/lyonbrown4d/nespa/controlapi"
+	"github.com/lyonbrown4d/nespa/runtime"
 )
 
 type Config struct {
@@ -25,30 +24,13 @@ type LivenessConfig struct {
 	DeadAfter     time.Duration
 }
 
-type serviceRuntime struct {
+type ServiceRuntime struct {
 	cfg      Config
 	state    *ControlState
 	liveness LivenessConfig
 }
 
-func Module() dix.Module {
-	return dix.NewModule("control",
-		dix.WithModuleProviders(
-			dix.Provider1(newServiceRuntime),
-		),
-		dix.WithModuleImports(
-			runtime.ConfiguredHTTPModule[*serviceRuntime]("control", controlHTTPConfig),
-		),
-		dix.WithModuleHooks(
-			dix.OnStart2[*slog.Logger, *serviceRuntime](func(ctx context.Context, logger *slog.Logger, svc *serviceRuntime) error {
-				go runLivenessSweep(ctx, logger, svc.state, svc.liveness)
-				return nil
-			}, dix.LifecycleName("control.liveness.start"), dix.LifecycleAfter("control.http.start")),
-		),
-	)
-}
-
-func newServiceRuntime(cfg Config) *serviceRuntime {
+func NewServiceRuntime(cfg Config) *ServiceRuntime {
 	state := NewControlState(cfg.ClusterID)
 	for _, node := range cfg.BootstrapNodes {
 		if node.NodeID != "" && node.Addr != "" {
@@ -56,14 +38,14 @@ func newServiceRuntime(cfg Config) *serviceRuntime {
 		}
 	}
 
-	return &serviceRuntime{
+	return &ServiceRuntime{
 		cfg:      cfg,
 		state:    state,
 		liveness: normalizeLivenessConfig(cfg.Liveness),
 	}
 }
 
-func controlHTTPConfig(svc *serviceRuntime) runtime.HTTPConfig {
+func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
 	cfg := svc.cfg
 	state := svc.state
 	return runtime.HTTPConfig{
@@ -95,6 +77,11 @@ func controlHTTPConfig(svc *serviceRuntime) runtime.HTTPConfig {
 			})
 		},
 	}
+}
+
+func StartLiveness(ctx context.Context, logger *slog.Logger, svc *ServiceRuntime) error {
+	go runLivenessSweep(ctx, logger, svc.state, svc.liveness)
+	return nil
 }
 
 func normalizeLivenessConfig(cfg LivenessConfig) LivenessConfig {

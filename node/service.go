@@ -9,13 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/httpx"
-	"github.com/lyonbrown4d/nespa/internal/cacheapi"
-	"github.com/lyonbrown4d/nespa/internal/controlapi"
-	"github.com/lyonbrown4d/nespa/internal/node/cache"
-	"github.com/lyonbrown4d/nespa/internal/node/engine"
-	"github.com/lyonbrown4d/nespa/internal/runtime"
+	"github.com/lyonbrown4d/nespa/cache"
+	"github.com/lyonbrown4d/nespa/cache/engine"
+	"github.com/lyonbrown4d/nespa/cacheapi"
+	"github.com/lyonbrown4d/nespa/controlapi"
+	"github.com/lyonbrown4d/nespa/runtime"
 )
 
 type Config struct {
@@ -36,52 +35,19 @@ type StatsBody struct {
 	Spaces      []cache.SpaceStats `json:"spaces"`
 }
 
-type serviceRuntime struct {
+type ServiceRuntime struct {
 	cfg               Config
 	cacheSvc          cache.Service
 	controlClient     *ControlClient
 	heartbeatInterval time.Duration
 }
 
-func Module() dix.Module {
-	eng := engine.NewMemory(engine.Config{
-		ShardCount:    16,
-		SweepInterval: time.Second,
-	})
-
-	return dix.NewModule("node",
-		dix.WithModuleProviders(
-			dix.Provider1(func(cfg Config) cache.Service {
-				return cache.NewService(eng, cache.WithQuota(cache.QuotaConfig{
-					DefaultNamespaceMemoryBytes: cfg.DefaultNamespaceMemoryBytes,
-					DefaultSpaceMemoryBytes:     cfg.DefaultSpaceMemoryBytes,
-				}))
-			}),
-			dix.Provider2(newServiceRuntime),
-		),
-		dix.WithModuleImports(
-			engine.Module(eng, time.Second),
-			runtime.ConfiguredHTTPModule[*serviceRuntime]("node", nodeHTTPConfig),
-		),
-		dix.WithModuleHooks(
-			dix.OnStart2[*slog.Logger, *serviceRuntime](func(ctx context.Context, logger *slog.Logger, svc *serviceRuntime) error {
-				if strings.TrimSpace(svc.cfg.ControlAddr) == "" {
-					return nil
-				}
-				registerWithControl(ctx, logger, svc.controlClient, svc.cfg)
-				go runControlHeartbeat(ctx, logger, svc.controlClient, svc.cfg, svc.heartbeatInterval)
-				return nil
-			}, dix.LifecycleName("node.control.register"), dix.LifecycleAfter("node.http.start")),
-		),
-	)
-}
-
-func newServiceRuntime(cfg Config, cacheSvc cache.Service) *serviceRuntime {
+func NewServiceRuntime(cfg Config, cacheSvc cache.Service) *ServiceRuntime {
 	heartbeatInterval := cfg.HeartbeatInterval
 	if heartbeatInterval <= 0 {
 		heartbeatInterval = 5 * time.Second
 	}
-	return &serviceRuntime{
+	return &ServiceRuntime{
 		cfg:               cfg,
 		cacheSvc:          cacheSvc,
 		controlClient:     NewControlClient(cfg.ControlAddr),
@@ -89,7 +55,7 @@ func newServiceRuntime(cfg Config, cacheSvc cache.Service) *serviceRuntime {
 	}
 }
 
-func nodeHTTPConfig(svc *serviceRuntime) runtime.HTTPConfig {
+func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
 	cfg := svc.cfg
 	return runtime.HTTPConfig{
 		Name: "node",
@@ -104,14 +70,23 @@ func nodeHTTPConfig(svc *serviceRuntime) runtime.HTTPConfig {
 	}
 }
 
-func registerNodeRoutes(server httpx.ServerRuntime, svc *serviceRuntime) {
+func StartControlRegistration(ctx context.Context, logger *slog.Logger, svc *ServiceRuntime) error {
+	if strings.TrimSpace(svc.cfg.ControlAddr) == "" {
+		return nil
+	}
+	registerWithControl(ctx, logger, svc.controlClient, svc.cfg)
+	go runControlHeartbeat(ctx, logger, svc.controlClient, svc.cfg, svc.heartbeatInterval)
+	return nil
+}
+
+func registerNodeRoutes(server httpx.ServerRuntime, svc *ServiceRuntime) {
 	httpx.MustGet(server, "/v1/node/stats", nodeStatsHandler(svc))
 	httpx.MustPut(server, "/v1/node/cache", nodeSetHandler(svc))
 	httpx.MustGet(server, "/v1/node/cache", nodeGetHandler(svc))
 	httpx.MustDelete(server, "/v1/node/cache", nodeDeleteHandler(svc))
 }
 
-func nodeStatsHandler(svc *serviceRuntime) func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[StatsBody], error) {
+func nodeStatsHandler(svc *ServiceRuntime) func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[StatsBody], error) {
 	return func(ctx context.Context, _ *runtime.EmptyInput) (*runtime.JSONResponse[StatsBody], error) {
 		stats, err := svc.cacheSvc.Stats(ctx)
 		if err != nil {
@@ -128,7 +103,7 @@ func nodeStatsHandler(svc *serviceRuntime) func(context.Context, *runtime.EmptyI
 	}
 }
 
-func nodeSetHandler(svc *serviceRuntime) func(context.Context, *cacheapi.SetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
+func nodeSetHandler(svc *ServiceRuntime) func(context.Context, *cacheapi.SetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 	return func(ctx context.Context, input *cacheapi.SetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 		rec, err := svc.cacheSvc.Set(ctx, cacheKey(input.Body.Namespace, input.Body.Space, input.Body.Entity, input.Body.Key), []byte(input.Body.Value), cache.SetOptions{
 			TTL:              ttlFromMillis(input.Body.TTLMillis),
@@ -142,7 +117,7 @@ func nodeSetHandler(svc *serviceRuntime) func(context.Context, *cacheapi.SetInpu
 	}
 }
 
-func nodeGetHandler(svc *serviceRuntime) func(context.Context, *cacheapi.GetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
+func nodeGetHandler(svc *ServiceRuntime) func(context.Context, *cacheapi.GetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 	return func(ctx context.Context, input *cacheapi.GetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 		rec, ok, err := svc.cacheSvc.Get(ctx, cacheKey(input.Namespace, input.Space, input.Entity, input.Key), cache.GetOptions{
 			NamespaceVersion: input.NamespaceVersion,
@@ -158,7 +133,7 @@ func nodeGetHandler(svc *serviceRuntime) func(context.Context, *cacheapi.GetInpu
 	}
 }
 
-func nodeDeleteHandler(svc *serviceRuntime) func(context.Context, *cacheapi.DeleteInput) (*runtime.JSONResponse[cacheapi.DeleteBody], error) {
+func nodeDeleteHandler(svc *ServiceRuntime) func(context.Context, *cacheapi.DeleteInput) (*runtime.JSONResponse[cacheapi.DeleteBody], error) {
 	return func(ctx context.Context, input *cacheapi.DeleteInput) (*runtime.JSONResponse[cacheapi.DeleteBody], error) {
 		deleted, err := svc.cacheSvc.Delete(ctx, cacheKey(input.Namespace, input.Space, input.Entity, input.Key))
 		if err != nil {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lyonbrown4d/nespa/internal/node/engine"
+	"github.com/lyonbrown4d/nespa/cache/engine"
 )
 
 func TestMemoryEngineSetGetCopiesValue(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lyonbrown4d/nespa/internal/control"
+	"github.com/lyonbrown4d/nespa/control"
 )
 
 func TestControlStateRegisterNodeBuildsSnapshotRoute(t *testing.T) {

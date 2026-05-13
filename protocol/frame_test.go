@@ -7,7 +7,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/lyonbrown4d/nespa/internal/protocol"
+	"github.com/lyonbrown4d/nespa/protocol"
 )
 
 func TestCodecRoundTrip(t *testing.T) {

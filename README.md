@@ -15,10 +15,9 @@ The scaffold follows the design document's foundation-package direction:
 - `github.com/arcgolabs/eventx` for in-process lifecycle events
 - `github.com/spf13/cobra` for the command tree
 
-The `cmd` package owns CLI flags and assembles the `dix` application. Config is
-loaded through a `dix` provider, then injected into control, frontend, data node,
-and admin modules. Each component is modeled as a `dix.Module` whose HTTP server
-starts and stops through lifecycle hooks.
+The `cmd` package owns CLI flags and assembles the `dix` application. Runtime
+components expose plain constructors, HTTP configs, and lifecycle functions;
+`cmd` wraps them as `dix` modules for the server binary.
 
 ## Run
 
@@ -111,7 +110,7 @@ payload      []byte
 ```
 
 `metadata` is opaque protocol metadata for now, while `payload` is raw binary
-cache value bytes. The codec lives in `internal/protocol`.
+cache value bytes. The codec lives in `protocol`.
 
 ## Verify
 

@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lyonbrown4d/nespa/internal/controlapi"
-	"github.com/lyonbrown4d/nespa/internal/node"
+	"github.com/lyonbrown4d/nespa/controlapi"
+	"github.com/lyonbrown4d/nespa/node"
 )
 
 func TestControlClientRegisterAndHeartbeat(t *testing.T) {

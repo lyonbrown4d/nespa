@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lyonbrown4d/nespa/internal/node/engine"
+	"github.com/lyonbrown4d/nespa/cache/engine"
 )
 
 func (s *EngineService) hasQuotaLimits() bool {

@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/eventx"
 	"github.com/arcgolabs/httpx"
 )
@@ -42,50 +41,6 @@ func NewHTTPService(cfg HTTPConfig) *HTTPService {
 		metadata: metadata,
 		routes:   cfg.Routes,
 	}
-}
-
-func HTTPModule(cfg HTTPConfig) dix.Module {
-	service := NewHTTPService(cfg)
-	return dix.NewModule(cfg.Name+".http",
-		dix.WithModuleHooks(
-			dix.OnStart2[*slog.Logger, eventx.BusRuntime](func(ctx context.Context, logger *slog.Logger, bus eventx.BusRuntime) error {
-				return service.Start(ctx, logger, bus)
-			}, dix.LifecycleName(cfg.Name+".http.start")),
-			dix.OnStop2[*slog.Logger, eventx.BusRuntime](func(ctx context.Context, logger *slog.Logger, bus eventx.BusRuntime) error {
-				return service.Stop(ctx, logger, bus)
-			}, dix.LifecycleName(cfg.Name+".http.stop")),
-		),
-	)
-}
-
-func ConfiguredHTTPModule[T any](name string, build func(T) HTTPConfig) dix.Module {
-	var mu sync.Mutex
-	var service *HTTPService
-
-	return dix.NewModule(name+".http",
-		dix.WithModuleHooks(
-			dix.OnStart3[T, *slog.Logger, eventx.BusRuntime](func(ctx context.Context, cfg T, logger *slog.Logger, bus eventx.BusRuntime) error {
-				next := NewHTTPService(build(cfg))
-
-				mu.Lock()
-				service = next
-				mu.Unlock()
-
-				return next.Start(ctx, logger, bus)
-			}, dix.LifecycleName(name+".http.start")),
-			dix.OnStop2[*slog.Logger, eventx.BusRuntime](func(ctx context.Context, logger *slog.Logger, bus eventx.BusRuntime) error {
-				mu.Lock()
-				current := service
-				service = nil
-				mu.Unlock()
-
-				if current == nil {
-					return nil
-				}
-				return current.Stop(ctx, logger, bus)
-			}, dix.LifecycleName(name+".http.stop")),
-		),
-	)
 }
 
 func (s *HTTPService) Name() string {
@@ -219,25 +174,4 @@ func (s *HTTPService) registerBaseRoutes(server httpx.ServerRuntime) {
 			Metadata: s.metadata,
 		}), nil
 	})
-}
-
-func FoundationModule(logger *slog.Logger) dix.Module {
-	return dix.NewModule("foundation",
-		dix.WithModuleProviders(
-			dix.Value(logger),
-			dix.Provider0(func() eventx.BusRuntime {
-				return eventx.New(
-					eventx.WithParallelDispatch(true),
-					eventx.WithAsyncErrorHandler(func(_ context.Context, event eventx.Event, err error) {
-						logger.Warn("event handler failed", "event", event.Name(), "error", err)
-					}),
-				)
-			}),
-		),
-		dix.WithModuleHooks(
-			dix.OnStop[eventx.BusRuntime](func(_ context.Context, bus eventx.BusRuntime) error {
-				return bus.Close()
-			}, dix.LifecycleName("foundation.eventbus.stop")),
-		),
-	)
 }

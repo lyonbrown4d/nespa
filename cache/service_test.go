@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lyonbrown4d/nespa/internal/node/cache"
-	"github.com/lyonbrown4d/nespa/internal/node/engine"
+	"github.com/lyonbrown4d/nespa/cache"
+	"github.com/lyonbrown4d/nespa/cache/engine"
 )
 
 func TestEngineServiceBatchSetGet(t *testing.T) {

@@ -5,10 +5,10 @@ import (
 
 	"github.com/arcgolabs/configx"
 	"github.com/arcgolabs/dix"
-	"github.com/lyonbrown4d/nespa/internal/admin"
-	"github.com/lyonbrown4d/nespa/internal/control"
-	"github.com/lyonbrown4d/nespa/internal/frontend"
-	"github.com/lyonbrown4d/nespa/internal/node"
+	"github.com/lyonbrown4d/nespa/admin"
+	"github.com/lyonbrown4d/nespa/control"
+	"github.com/lyonbrown4d/nespa/frontend"
+	"github.com/lyonbrown4d/nespa/node"
 	"github.com/spf13/pflag"
 )
 

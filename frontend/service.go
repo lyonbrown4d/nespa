@@ -6,10 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/httpx"
-	"github.com/lyonbrown4d/nespa/internal/cacheapi"
-	"github.com/lyonbrown4d/nespa/internal/runtime"
+	"github.com/lyonbrown4d/nespa/cacheapi"
+	"github.com/lyonbrown4d/nespa/runtime"
 )
 
 type Config struct {
@@ -18,41 +17,20 @@ type Config struct {
 	NodeAddr    string
 }
 
-type serviceRuntime struct {
+type ServiceRuntime struct {
 	cfg           Config
 	routeCache    *RouteCache
 	controlClient *ControlClient
 	nodeClient    *NodeClient
 }
 
-func Module() dix.Module {
-	return dix.NewModule("frontend",
-		dix.WithModuleProviders(
-			dix.Provider1(newServiceRuntime),
-		),
-		dix.WithModuleImports(
-			runtime.ConfiguredHTTPModule[*serviceRuntime]("frontend", frontendHTTPConfig),
-		),
-		dix.WithModuleHooks(
-			dix.OnStart2[*slog.Logger, *serviceRuntime](func(ctx context.Context, logger *slog.Logger, svc *serviceRuntime) error {
-				if !hasAddress(svc.cfg.ControlAddr) {
-					return nil
-				}
-				refreshRoutes(ctx, logger, svc.controlClient, svc.routeCache, svc.cfg.ControlAddr)
-				go runRouteRefreshLoop(ctx, logger, svc.controlClient, svc.routeCache, svc.cfg.ControlAddr, 2*time.Second)
-				return nil
-			}, dix.LifecycleName("frontend.routes.refresh"), dix.LifecycleBefore("frontend.http.start")),
-		),
-	)
-}
-
-func newServiceRuntime(cfg Config) *serviceRuntime {
+func NewServiceRuntime(cfg Config) *ServiceRuntime {
 	initialRoutes := []Route{}
 	if hasAddress(cfg.NodeAddr) {
 		initialRoutes = append(initialRoutes, Route{Role: "data-node", Addr: cfg.NodeAddr, Weight: 1})
 	}
 
-	return &serviceRuntime{
+	return &ServiceRuntime{
 		cfg:           cfg,
 		routeCache:    NewRouteCache("bootstrap", initialRoutes),
 		controlClient: NewControlClient(cfg.ControlAddr),
@@ -60,7 +38,7 @@ func newServiceRuntime(cfg Config) *serviceRuntime {
 	}
 }
 
-func frontendHTTPConfig(svc *serviceRuntime) runtime.HTTPConfig {
+func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
 	cfg := svc.cfg
 	return runtime.HTTPConfig{
 		Name: "frontend",
@@ -76,20 +54,29 @@ func frontendHTTPConfig(svc *serviceRuntime) runtime.HTTPConfig {
 	}
 }
 
-func registerFrontendRoutes(server httpx.ServerRuntime, svc *serviceRuntime) {
+func StartRouteRefresh(ctx context.Context, logger *slog.Logger, svc *ServiceRuntime) error {
+	if !hasAddress(svc.cfg.ControlAddr) {
+		return nil
+	}
+	refreshRoutes(ctx, logger, svc.controlClient, svc.routeCache, svc.cfg.ControlAddr)
+	go runRouteRefreshLoop(ctx, logger, svc.controlClient, svc.routeCache, svc.cfg.ControlAddr, 2*time.Second)
+	return nil
+}
+
+func registerFrontendRoutes(server httpx.ServerRuntime, svc *ServiceRuntime) {
 	httpx.MustGet(server, "/v1/frontend/routes", frontendRoutesHandler(svc))
 	httpx.MustPut(server, "/v1/cache", frontendSetHandler(svc))
 	httpx.MustGet(server, "/v1/cache", frontendGetHandler(svc))
 	httpx.MustDelete(server, "/v1/cache", frontendDeleteHandler(svc))
 }
 
-func frontendRoutesHandler(svc *serviceRuntime) func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[RoutesBody], error) {
+func frontendRoutesHandler(svc *ServiceRuntime) func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[RoutesBody], error) {
 	return func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[RoutesBody], error) {
 		return runtime.JSON(svc.routeCache.Snapshot()), nil
 	}
 }
 
-func frontendSetHandler(svc *serviceRuntime) func(context.Context, *cacheapi.SetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
+func frontendSetHandler(svc *ServiceRuntime) func(context.Context, *cacheapi.SetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 	return func(ctx context.Context, input *cacheapi.SetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 		route, ok := svc.routeCache.Select(input.Body.Namespace, input.Body.Space)
 		if !ok {
@@ -103,7 +90,7 @@ func frontendSetHandler(svc *serviceRuntime) func(context.Context, *cacheapi.Set
 	}
 }
 
-func frontendGetHandler(svc *serviceRuntime) func(context.Context, *cacheapi.GetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
+func frontendGetHandler(svc *ServiceRuntime) func(context.Context, *cacheapi.GetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 	return func(ctx context.Context, input *cacheapi.GetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 		route, ok := svc.routeCache.Select(input.Namespace, input.Space)
 		if !ok {
@@ -117,7 +104,7 @@ func frontendGetHandler(svc *serviceRuntime) func(context.Context, *cacheapi.Get
 	}
 }
 
-func frontendDeleteHandler(svc *serviceRuntime) func(context.Context, *cacheapi.DeleteInput) (*runtime.JSONResponse[cacheapi.DeleteBody], error) {
+func frontendDeleteHandler(svc *ServiceRuntime) func(context.Context, *cacheapi.DeleteInput) (*runtime.JSONResponse[cacheapi.DeleteBody], error) {
 	return func(ctx context.Context, input *cacheapi.DeleteInput) (*runtime.JSONResponse[cacheapi.DeleteBody], error) {
 		route, ok := svc.routeCache.Select(input.Namespace, input.Space)
 		if !ok {

@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lyonbrown4d/nespa/internal/cacheapi"
-	"github.com/lyonbrown4d/nespa/internal/frontend"
+	"github.com/lyonbrown4d/nespa/cacheapi"
+	"github.com/lyonbrown4d/nespa/frontend"
 )
 
 func TestNodeClientSetGetDelete(t *testing.T) {

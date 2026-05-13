@@ -14,11 +14,6 @@ import (
 	collectionlist "github.com/arcgolabs/collectionx/list"
 	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/logx"
-	"github.com/lyonbrown4d/nespa/internal/admin"
-	"github.com/lyonbrown4d/nespa/internal/control"
-	"github.com/lyonbrown4d/nespa/internal/frontend"
-	"github.com/lyonbrown4d/nespa/internal/node"
-	"github.com/lyonbrown4d/nespa/internal/runtime"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -196,13 +191,13 @@ func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags
 		dix.WithLogger(logger),
 		dix.WithRecentEvents(128),
 		dix.WithModules(
-			runtime.FoundationModule(logger),
+			foundationModule(logger),
 			configModule(flags),
 			bannerModule(stdout),
-			control.Module(),
-			frontend.Module(),
-			node.Module(),
-			admin.Module(),
+			controlModule(),
+			frontendModule(),
+			nodeModule(),
+			adminModule(),
 		),
 		dix.WithRunStopTimeout(5*time.Second),
 	)

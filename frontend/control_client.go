@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/arcgolabs/httpx"
-	"github.com/lyonbrown4d/nespa/internal/controlapi"
+	"github.com/lyonbrown4d/nespa/controlapi"
 )
 
 type ControlClient struct {

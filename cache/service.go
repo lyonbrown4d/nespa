@@ -8,8 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arcgolabs/dix"
-	"github.com/lyonbrown4d/nespa/internal/node/engine"
+	"github.com/lyonbrown4d/nespa/cache/engine"
 )
 
 type Key = engine.Key
@@ -111,14 +110,6 @@ func NewService(eng engine.Engine, opts ...Option) *EngineService {
 		opt(svc)
 	}
 	return svc
-}
-
-func Module(svc Service) dix.Module {
-	return dix.NewModule("node.cache",
-		dix.WithModuleProviders(
-			dix.Value[Service](svc),
-		),
-	)
 }
 
 func (s *EngineService) Set(ctx context.Context, key Key, value []byte, opts SetOptions) (Record, error) {

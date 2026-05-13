@@ -3,8 +3,8 @@ package frontend_test
 import (
 	"testing"
 
-	"github.com/lyonbrown4d/nespa/internal/controlapi"
-	"github.com/lyonbrown4d/nespa/internal/frontend"
+	"github.com/lyonbrown4d/nespa/controlapi"
+	"github.com/lyonbrown4d/nespa/frontend"
 )
 
 func TestRouteCacheSelectPrefersExactThenNamespaceThenWildcard(t *testing.T) {
