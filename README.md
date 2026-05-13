@@ -43,6 +43,14 @@ curl http://127.0.0.1:7403/healthz
 curl http://127.0.0.1:7404/healthz
 ```
 
+Control-plane snapshot:
+
+```bash
+curl http://127.0.0.1:7401/v1/control/state
+curl http://127.0.0.1:7401/v1/control/snapshot
+curl http://127.0.0.1:7402/v1/frontend/routes
+```
+
 Node storage smoke test:
 
 ```bash
@@ -55,12 +63,23 @@ curl http://127.0.0.1:7403/v1/node/stats
 curl -X DELETE 'http://127.0.0.1:7403/v1/node/cache?namespace=order-service&space=session&key=u1'
 ```
 
+Frontend gateway smoke test:
+
+```bash
+curl -X PUT http://127.0.0.1:7402/v1/cache \
+  -H 'content-type: application/json' \
+  -d '{"namespace":"order-service","space":"session","key":"u1","value":"payload","ttl_ms":60000}'
+
+curl 'http://127.0.0.1:7402/v1/cache?namespace=order-service&space=session&key=u1'
+curl -X DELETE 'http://127.0.0.1:7402/v1/cache?namespace=order-service&space=session&key=u1'
+```
+
 Run a single component:
 
 ```bash
 go run ./cmd control
-go run ./cmd frontend
-go run ./cmd node --quota-space-memory-bytes 104857600
+go run ./cmd frontend --node-addr 127.0.0.1:7403
+go run ./cmd node --control-addr 127.0.0.1:7401 --quota-space-memory-bytes 104857600
 go run ./cmd admin
 ```
 

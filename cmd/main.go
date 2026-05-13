@@ -125,9 +125,14 @@ type nodeConfig struct {
 	Quota quotaConfig `mapstructure:"quota"`
 }
 
+type frontendConfig struct {
+	Addr string         `mapstructure:"addr"`
+	Node endpointConfig `mapstructure:"node"`
+}
+
 type devConfig struct {
 	Control  endpointConfig `mapstructure:"control"`
-	Frontend endpointConfig `mapstructure:"frontend"`
+	Frontend frontendConfig `mapstructure:"frontend"`
 	Node     nodeConfig     `mapstructure:"node"`
 	Admin    endpointConfig `mapstructure:"admin"`
 }
@@ -154,11 +159,21 @@ func devCommand(ctx context.Context, stdout io.Writer, logger *slog.Logger) *cob
 				return fmt.Errorf("load dev config: %w", err)
 			}
 
+			frontendNodeAddr := cfg.Frontend.Node.Addr
+			if frontendNodeAddr == "" {
+				frontendNodeAddr = cfg.Node.Addr
+			}
+
 			modules := []dix.Module{
 				control.Module(control.Config{Addr: cfg.Control.Addr, ClusterID: "dev"}),
-				frontend.Module(frontend.Config{Addr: cfg.Frontend.Addr, ControlAddr: cfg.Control.Addr}),
+				frontend.Module(frontend.Config{
+					Addr:        cfg.Frontend.Addr,
+					ControlAddr: cfg.Control.Addr,
+					NodeAddr:    frontendNodeAddr,
+				}),
 				node.Module(node.Config{
 					Addr:                        cfg.Node.Addr,
+					ControlAddr:                 cfg.Control.Addr,
 					NodeID:                      "dev-node-1",
 					DefaultNamespaceMemoryBytes: cfg.Node.Quota.Namespace.Memory.Bytes,
 					DefaultSpaceMemoryBytes:     cfg.Node.Quota.Space.Memory.Bytes,
@@ -182,6 +197,7 @@ func devCommand(ctx context.Context, stdout io.Writer, logger *slog.Logger) *cob
 
 	cmd.Flags().String("control-addr", "127.0.0.1:7401", "control-plane HTTP listen address")
 	cmd.Flags().String("frontend-addr", "127.0.0.1:7402", "frontend HTTP listen address")
+	cmd.Flags().String("frontend-node-addr", "", "data-node address used by the frontend gateway; defaults to --node-addr")
 	cmd.Flags().String("node-addr", "127.0.0.1:7403", "data-node HTTP listen address")
 	cmd.Flags().String("admin-addr", "127.0.0.1:7404", "admin HTTP listen address")
 	cmd.Flags().Uint64("node-quota-namespace-memory-bytes", 0, "default namespace memory quota for the dev data node; 0 disables the limit")
@@ -222,6 +238,7 @@ func controlCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 type frontendCommandConfig struct {
 	Addr    string         `mapstructure:"addr"`
 	Control endpointConfig `mapstructure:"control"`
+	Node    endpointConfig `mapstructure:"node"`
 }
 
 func frontendCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
@@ -232,6 +249,7 @@ func frontendCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 			cfg, err := loadConfig[frontendCommandConfig](cmd.Flags(), "NESPA_FRONTEND", map[string]any{
 				"addr":         "127.0.0.1:7402",
 				"control.addr": "127.0.0.1:7401",
+				"node.addr":    "127.0.0.1:7403",
 			})
 			if err != nil {
 				return fmt.Errorf("load frontend config: %w", err)
@@ -240,19 +258,22 @@ func frontendCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 			return runDixApp(ctx, logger, "nespa-frontend", frontend.Module(frontend.Config{
 				Addr:        cfg.Addr,
 				ControlAddr: cfg.Control.Addr,
+				NodeAddr:    cfg.Node.Addr,
 			}))
 		},
 	}
 
 	cmd.Flags().String("addr", "127.0.0.1:7402", "HTTP listen address")
 	cmd.Flags().String("control-addr", "127.0.0.1:7401", "control-plane address")
+	cmd.Flags().String("node-addr", "127.0.0.1:7403", "data-node address")
 	return cmd
 }
 
 type nodeCommandConfig struct {
-	Addr  string         `mapstructure:"addr"`
-	Node  identityConfig `mapstructure:"node"`
-	Quota quotaConfig    `mapstructure:"quota"`
+	Addr    string         `mapstructure:"addr"`
+	Control endpointConfig `mapstructure:"control"`
+	Node    identityConfig `mapstructure:"node"`
+	Quota   quotaConfig    `mapstructure:"quota"`
 }
 
 func nodeCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
@@ -262,6 +283,7 @@ func nodeCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfig[nodeCommandConfig](cmd.Flags(), "NESPA_NODE", map[string]any{
 				"addr":                         "127.0.0.1:7403",
+				"control.addr":                 "127.0.0.1:7401",
 				"node.id":                      "node-1",
 				"quota.namespace.memory.bytes": uint64(0),
 				"quota.space.memory.bytes":     uint64(0),
@@ -272,6 +294,7 @@ func nodeCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 
 			return runDixApp(ctx, logger, "nespa-node", node.Module(node.Config{
 				Addr:                        cfg.Addr,
+				ControlAddr:                 cfg.Control.Addr,
 				NodeID:                      cfg.Node.ID,
 				DefaultNamespaceMemoryBytes: cfg.Quota.Namespace.Memory.Bytes,
 				DefaultSpaceMemoryBytes:     cfg.Quota.Space.Memory.Bytes,
@@ -280,6 +303,7 @@ func nodeCommand(ctx context.Context, logger *slog.Logger) *cobra.Command {
 	}
 
 	cmd.Flags().String("addr", "127.0.0.1:7403", "HTTP listen address")
+	cmd.Flags().String("control-addr", "127.0.0.1:7401", "control-plane address")
 	cmd.Flags().String("node-id", "node-1", "data-node identifier")
 	cmd.Flags().Uint64("quota-namespace-memory-bytes", 0, "default namespace memory quota; 0 disables the limit")
 	cmd.Flags().Uint64("quota-space-memory-bytes", 0, "default space memory quota; 0 disables the limit")

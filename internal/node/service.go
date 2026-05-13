@@ -3,11 +3,15 @@ package node
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/httpx"
+	"github.com/lyonbrown4d/nespa/internal/cacheapi"
+	"github.com/lyonbrown4d/nespa/internal/controlapi"
 	"github.com/lyonbrown4d/nespa/internal/node/cache"
 	"github.com/lyonbrown4d/nespa/internal/node/engine"
 	"github.com/lyonbrown4d/nespa/internal/runtime"
@@ -15,6 +19,7 @@ import (
 
 type Config struct {
 	Addr                        string
+	ControlAddr                 string
 	NodeID                      string
 	DefaultNamespaceMemoryBytes uint64
 	DefaultSpaceMemoryBytes     uint64
@@ -29,54 +34,6 @@ type StatsBody struct {
 	Spaces      []cache.SpaceStats `json:"spaces"`
 }
 
-type CacheSetInput struct {
-	Body CacheSetBody
-}
-
-type CacheSetBody struct {
-	Namespace        string `json:"namespace"`
-	Space            string `json:"space"`
-	Entity           string `json:"entity,omitempty"`
-	Key              string `json:"key"`
-	Value            string `json:"value"`
-	TTLMillis        int64  `json:"ttl_ms,omitempty"`
-	NamespaceVersion uint64 `json:"namespace_version,omitempty"`
-	SpaceVersion     uint64 `json:"space_version,omitempty"`
-}
-
-type CacheGetInput struct {
-	Namespace        string `query:"namespace"`
-	Space            string `query:"space"`
-	Entity           string `query:"entity"`
-	Key              string `query:"key"`
-	NamespaceVersion uint64 `query:"namespace_version"`
-	SpaceVersion     uint64 `query:"space_version"`
-}
-
-type CacheDeleteInput struct {
-	Namespace string `query:"namespace"`
-	Space     string `query:"space"`
-	Entity    string `query:"entity"`
-	Key       string `query:"key"`
-}
-
-type CacheRecordBody struct {
-	Found            bool   `json:"found"`
-	Namespace        string `json:"namespace,omitempty"`
-	Space            string `json:"space,omitempty"`
-	Entity           string `json:"entity,omitempty"`
-	Key              string `json:"key,omitempty"`
-	Value            string `json:"value,omitempty"`
-	Version          uint64 `json:"version,omitempty"`
-	NamespaceVersion uint64 `json:"namespace_version,omitempty"`
-	SpaceVersion     uint64 `json:"space_version,omitempty"`
-	ExpireAtUnixMs   int64  `json:"expire_at_ms,omitempty"`
-}
-
-type CacheDeleteBody struct {
-	Deleted bool `json:"deleted"`
-}
-
 func Module(cfg Config) dix.Module {
 	eng := engine.NewMemory(engine.Config{
 		ShardCount:    16,
@@ -86,6 +43,7 @@ func Module(cfg Config) dix.Module {
 		DefaultNamespaceMemoryBytes: cfg.DefaultNamespaceMemoryBytes,
 		DefaultSpaceMemoryBytes:     cfg.DefaultSpaceMemoryBytes,
 	}))
+	controlClient := NewControlClient(cfg.ControlAddr)
 
 	return dix.NewModule("node",
 		dix.WithModuleImports(
@@ -114,7 +72,7 @@ func Module(cfg Config) dix.Module {
 						}), nil
 					})
 
-					httpx.MustPut(server, "/v1/node/cache", func(ctx context.Context, input *CacheSetInput) (*runtime.JSONResponse[CacheRecordBody], error) {
+					httpx.MustPut(server, "/v1/node/cache", func(ctx context.Context, input *cacheapi.SetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 						rec, err := cacheSvc.Set(ctx, cacheKey(input.Body.Namespace, input.Body.Space, input.Body.Entity, input.Body.Key), []byte(input.Body.Value), cache.SetOptions{
 							TTL:              ttlFromMillis(input.Body.TTLMillis),
 							NamespaceVersion: input.Body.NamespaceVersion,
@@ -126,7 +84,7 @@ func Module(cfg Config) dix.Module {
 						return runtime.JSON(cacheRecordBody(rec, true)), nil
 					})
 
-					httpx.MustGet(server, "/v1/node/cache", func(ctx context.Context, input *CacheGetInput) (*runtime.JSONResponse[CacheRecordBody], error) {
+					httpx.MustGet(server, "/v1/node/cache", func(ctx context.Context, input *cacheapi.GetInput) (*runtime.JSONResponse[cacheapi.RecordBody], error) {
 						rec, ok, err := cacheSvc.Get(ctx, cacheKey(input.Namespace, input.Space, input.Entity, input.Key), cache.GetOptions{
 							NamespaceVersion: input.NamespaceVersion,
 							SpaceVersion:     input.SpaceVersion,
@@ -135,20 +93,37 @@ func Module(cfg Config) dix.Module {
 							return nil, mapCacheError(err)
 						}
 						if !ok {
-							return runtime.JSON(CacheRecordBody{Found: false}), nil
+							return runtime.JSON(cacheapi.RecordBody{Found: false}), nil
 						}
 						return runtime.JSON(cacheRecordBody(rec, true)), nil
 					})
 
-					httpx.MustDelete(server, "/v1/node/cache", func(ctx context.Context, input *CacheDeleteInput) (*runtime.JSONResponse[CacheDeleteBody], error) {
+					httpx.MustDelete(server, "/v1/node/cache", func(ctx context.Context, input *cacheapi.DeleteInput) (*runtime.JSONResponse[cacheapi.DeleteBody], error) {
 						deleted, err := cacheSvc.Delete(ctx, cacheKey(input.Namespace, input.Space, input.Entity, input.Key))
 						if err != nil {
 							return nil, mapCacheError(err)
 						}
-						return runtime.JSON(CacheDeleteBody{Deleted: deleted}), nil
+						return runtime.JSON(cacheapi.DeleteBody{Deleted: deleted}), nil
 					})
 				},
 			}),
+		),
+		dix.WithModuleHooks(
+			dix.OnStart[*slog.Logger](func(ctx context.Context, logger *slog.Logger) error {
+				if strings.TrimSpace(cfg.ControlAddr) == "" {
+					return nil
+				}
+				resp, err := controlClient.RegisterNode(ctx, controlapi.RegisterNodeBody{
+					NodeID: cfg.NodeID,
+					Addr:   cfg.Addr,
+				})
+				if err != nil {
+					logger.Warn("node control-plane registration failed", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "error", err)
+					return nil
+				}
+				logger.Info("node registered with control-plane", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "revision", resp.Revision)
+				return nil
+			}, dix.LifecycleName("node.control.register"), dix.LifecycleAfter("node.http.start")),
 		),
 	)
 }
@@ -169,8 +144,8 @@ func ttlFromMillis(ms int64) time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-func cacheRecordBody(rec cache.Record, found bool) CacheRecordBody {
-	out := CacheRecordBody{
+func cacheRecordBody(rec cache.Record, found bool) cacheapi.RecordBody {
+	out := cacheapi.RecordBody{
 		Found:            found,
 		Namespace:        rec.Key.Namespace,
 		Space:            rec.Key.Space,
