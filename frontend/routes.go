@@ -1,18 +1,22 @@
 package frontend
 
 import (
+	"encoding/binary"
+	"hash/fnv"
 	"sync"
 
 	"github.com/lyonbrown4d/nespa/controlapi"
 )
 
 type Route struct {
-	Namespace string `json:"namespace,omitempty"`
-	Space     string `json:"space,omitempty"`
-	Role      string `json:"role"`
-	NodeID    string `json:"node_id,omitempty"`
-	Addr      string `json:"addr"`
-	Weight    uint32 `json:"weight,omitempty"`
+	Namespace  string `json:"namespace,omitempty"`
+	Space      string `json:"space,omitempty"`
+	VSlotStart uint32 `json:"vslot_start"`
+	VSlotEnd   uint32 `json:"vslot_end"`
+	Role       string `json:"role"`
+	NodeID     string `json:"node_id,omitempty"`
+	Addr       string `json:"addr"`
+	Weight     uint32 `json:"weight,omitempty"`
 }
 
 type RoutesBody struct {
@@ -31,7 +35,7 @@ type RouteCache struct {
 func NewRouteCache(source string, routes []Route) *RouteCache {
 	return &RouteCache{
 		source: source,
-		routes: cloneRoutes(routes),
+		routes: normalizeRoutes(routes),
 	}
 }
 
@@ -46,18 +50,20 @@ func (c *RouteCache) UpdateFromSnapshot(snapshot controlapi.SnapshotBody, source
 	routes := make([]Route, 0, len(snapshot.Routes))
 	for _, route := range snapshot.Routes {
 		routes = append(routes, Route{
-			Namespace: route.Namespace,
-			Space:     route.Space,
-			Role:      "data-node",
-			NodeID:    route.NodeID,
-			Addr:      route.Addr,
-			Weight:    route.Weight,
+			Namespace:  route.Namespace,
+			Space:      route.Space,
+			VSlotStart: route.VSlotStart,
+			VSlotEnd:   route.VSlotEnd,
+			Role:       "data-node",
+			NodeID:     route.NodeID,
+			Addr:       route.Addr,
+			Weight:     route.Weight,
 		})
 	}
 
 	c.epoch = snapshot.Revision
 	c.source = source
-	c.routes = routes
+	c.routes = normalizeRoutes(routes)
 	return true
 }
 
@@ -73,14 +79,19 @@ func (c *RouteCache) Snapshot() RoutesBody {
 }
 
 func (c *RouteCache) Select(namespace, space string) (Route, bool) {
+	return c.SelectKey(namespace, space, "")
+}
+
+func (c *RouteCache) SelectKey(namespace, space, key string) (Route, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	vslot := VSlotFor(namespace, space, key)
 	var namespaceMatch *Route
 	var wildcard *Route
 	for i := range c.routes {
 		route := &c.routes[i]
-		switch selectMatch(route, namespace, space) {
+		switch selectMatch(route, namespace, space, vslot) {
 		case exactRoute:
 			return *route, true
 		case namespaceRoute:
@@ -97,6 +108,14 @@ func (c *RouteCache) Select(namespace, space string) (Route, bool) {
 	return firstRoute(namespaceMatch, wildcard)
 }
 
+func VSlotFor(namespace, space, key string) uint32 {
+	hash := fnv.New64a()
+	writeHashPart(hash, namespace)
+	writeHashPart(hash, space)
+	writeHashPart(hash, key)
+	return uint32(hash.Sum64() % uint64(controlapi.VSlotCount))
+}
+
 type routeMatch uint8
 
 const (
@@ -106,8 +125,11 @@ const (
 	wildcardRoute
 )
 
-func selectMatch(route *Route, namespace, space string) routeMatch {
+func selectMatch(route *Route, namespace, space string, vslot uint32) routeMatch {
 	if route.Role != "data-node" || route.Addr == "" {
+		return noRoute
+	}
+	if !route.ContainsVSlot(vslot) {
 		return noRoute
 	}
 	if route.Namespace == namespace && route.Space == space {
@@ -120,6 +142,10 @@ func selectMatch(route *Route, namespace, space string) routeMatch {
 		return wildcardRoute
 	}
 	return noRoute
+}
+
+func (r Route) ContainsVSlot(vslot uint32) bool {
+	return vslot >= r.VSlotStart && vslot <= r.VSlotEnd
 }
 
 func firstRoute(routes ...*Route) (Route, bool) {
@@ -136,4 +162,25 @@ func cloneRoutes(routes []Route) []Route {
 	out := make([]Route, len(routes))
 	copy(out, routes)
 	return out
+}
+
+func normalizeRoutes(routes []Route) []Route {
+	out := cloneRoutes(routes)
+	for i := range out {
+		if out[i].VSlotStart == 0 && out[i].VSlotEnd == 0 {
+			out[i].VSlotEnd = controlapi.VSlotMax
+		}
+	}
+	return out
+}
+
+func writeHashPart(hash interface{ Write([]byte) (int, error) }, value string) {
+	var size []byte
+	size = binary.AppendUvarint(size, uint64(len(value)))
+	if _, err := hash.Write(size); err != nil {
+		return
+	}
+	if _, err := hash.Write([]byte(value)); err != nil {
+		return
+	}
 }

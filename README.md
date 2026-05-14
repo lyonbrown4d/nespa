@@ -42,13 +42,39 @@ curl http://127.0.0.1:7402/healthz
 curl http://127.0.0.1:7404/healthz
 ```
 
-Control-plane snapshot:
+Control-plane snapshot and vslot routes:
 
 ```bash
 curl http://127.0.0.1:7401/v1/control/state
 curl http://127.0.0.1:7401/v1/control/snapshot
+curl http://127.0.0.1:7401/v1/control/namespaces
+curl http://127.0.0.1:7401/v1/control/spaces
 curl http://127.0.0.1:7401/v1/control/nodes
 curl http://127.0.0.1:7402/routes
+```
+
+Create local catalog metadata:
+
+```bash
+curl -X POST http://127.0.0.1:7401/v1/control/namespaces \
+  -H 'content-type: application/json' \
+  -d '{"namespace":"orders"}'
+
+curl -X POST http://127.0.0.1:7401/v1/control/spaces \
+  -H 'content-type: application/json' \
+  -d '{"namespace":"orders","space":"session"}'
+```
+
+Flush by version bump:
+
+```bash
+curl -X POST http://127.0.0.1:7401/v1/control/namespaces/version-bump \
+  -H 'content-type: application/json' \
+  -d '{"namespace":"orders"}'
+
+curl -X POST http://127.0.0.1:7401/v1/control/spaces/version-bump \
+  -H 'content-type: application/json' \
+  -d '{"namespace":"orders","space":"session"}'
 ```
 
 Useful startup flags:

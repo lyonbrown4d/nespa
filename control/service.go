@@ -3,7 +3,9 @@ package control
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/arcgolabs/httpx"
@@ -33,8 +35,8 @@ type ServiceRuntime struct {
 func NewServiceRuntime(cfg Config) *ServiceRuntime {
 	state := NewControlState(cfg.ClusterID)
 	for _, node := range cfg.BootstrapNodes {
-		if node.NodeID != "" && node.Addr != "" {
-			state.RegisterNode(node.NodeID, node.Addr)
+		if _, err := state.RegisterNode(node.NodeID, node.Addr); err != nil {
+			continue
 		}
 	}
 
@@ -56,26 +58,95 @@ func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
 			"role":       "control-plane",
 		},
 		Routes: func(server httpx.ServerRuntime) {
-			httpx.MustGet(server, "/v1/control/state", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.StateBody], error) {
-				return runtime.JSON(state.State()), nil
-			})
-
-			httpx.MustGet(server, "/v1/control/snapshot", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.SnapshotBody], error) {
-				return runtime.JSON(state.Snapshot()), nil
-			})
-
-			httpx.MustGet(server, "/v1/control/nodes", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.NodesBody], error) {
-				return runtime.JSON(state.Nodes()), nil
-			})
-
-			httpx.MustPost(server, "/v1/control/nodes", func(_ context.Context, input *controlapi.RegisterNodeInput) (*runtime.JSONResponse[controlapi.RegisterNodeResponse], error) {
-				return runtime.JSON(state.RegisterNode(input.Body.NodeID, input.Body.Addr)), nil
-			})
-
-			httpx.MustPut(server, "/v1/control/nodes/heartbeat", func(_ context.Context, input *controlapi.HeartbeatInput) (*runtime.JSONResponse[controlapi.HeartbeatResponse], error) {
-				return runtime.JSON(state.Heartbeat(input.Body.NodeID, input.Body.Addr)), nil
-			})
+			registerReadRoutes(server, state)
+			registerCatalogRoutes(server, state)
+			registerNodeRoutes(server, state)
 		},
+	}
+}
+
+func registerReadRoutes(server httpx.ServerRuntime, state *ControlState) {
+	httpx.MustGet(server, "/v1/control/state", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.StateBody], error) {
+		return runtime.JSON(state.State()), nil
+	})
+
+	httpx.MustGet(server, "/v1/control/snapshot", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.SnapshotBody], error) {
+		return runtime.JSON(state.Snapshot()), nil
+	})
+
+	httpx.MustGet(server, "/v1/control/nodes", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.NodesBody], error) {
+		return runtime.JSON(state.Nodes()), nil
+	})
+}
+
+func registerCatalogRoutes(server httpx.ServerRuntime, state *ControlState) {
+	httpx.MustGet(server, "/v1/control/namespaces", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.NamespacesBody], error) {
+		return runtime.JSON(state.Namespaces()), nil
+	})
+
+	httpx.MustPost(server, "/v1/control/namespaces", func(_ context.Context, input *controlapi.CreateNamespaceInput) (*runtime.JSONResponse[controlapi.CreateNamespaceResponse], error) {
+		response, err := state.CreateNamespace(input.Body.Namespace)
+		if err != nil {
+			return nil, controlStateError("create namespace failed", err)
+		}
+		return runtime.JSON(response), nil
+	})
+
+	httpx.MustPost(server, "/v1/control/namespaces/version-bump", func(_ context.Context, input *controlapi.BumpNamespaceVersionInput) (*runtime.JSONResponse[controlapi.BumpNamespaceVersionResponse], error) {
+		response, err := state.BumpNamespaceVersion(input.Body.Namespace)
+		if err != nil {
+			return nil, controlStateError("bump namespace version failed", err)
+		}
+		return runtime.JSON(response), nil
+	})
+
+	httpx.MustGet(server, "/v1/control/spaces", func(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.SpacesBody], error) {
+		return runtime.JSON(state.Spaces()), nil
+	})
+
+	httpx.MustPost(server, "/v1/control/spaces", func(_ context.Context, input *controlapi.CreateSpaceInput) (*runtime.JSONResponse[controlapi.CreateSpaceResponse], error) {
+		response, err := state.CreateSpace(input.Body.Namespace, input.Body.Space)
+		if err != nil {
+			return nil, controlStateError("create space failed", err)
+		}
+		return runtime.JSON(response), nil
+	})
+
+	httpx.MustPost(server, "/v1/control/spaces/version-bump", func(_ context.Context, input *controlapi.BumpSpaceVersionInput) (*runtime.JSONResponse[controlapi.BumpSpaceVersionResponse], error) {
+		response, err := state.BumpSpaceVersion(input.Body.Namespace, input.Body.Space)
+		if err != nil {
+			return nil, controlStateError("bump space version failed", err)
+		}
+		return runtime.JSON(response), nil
+	})
+}
+
+func registerNodeRoutes(server httpx.ServerRuntime, state *ControlState) {
+	httpx.MustPost(server, "/v1/control/nodes", func(_ context.Context, input *controlapi.RegisterNodeInput) (*runtime.JSONResponse[controlapi.RegisterNodeResponse], error) {
+		response, err := state.RegisterNode(input.Body.NodeID, input.Body.Addr)
+		if err != nil {
+			return nil, controlStateError("invalid node registration", err)
+		}
+		return runtime.JSON(response), nil
+	})
+
+	httpx.MustPut(server, "/v1/control/nodes/heartbeat", func(_ context.Context, input *controlapi.HeartbeatInput) (*runtime.JSONResponse[controlapi.HeartbeatResponse], error) {
+		response, err := state.Heartbeat(input.Body.NodeID, input.Body.Addr)
+		if err != nil {
+			return nil, controlStateError("invalid node heartbeat", err)
+		}
+		return runtime.JSON(response), nil
+	})
+}
+
+func controlStateError(message string, err error) error {
+	switch {
+	case errors.Is(err, ErrNamespaceNotFound), errors.Is(err, ErrSpaceNotFound):
+		return httpx.NewError(http.StatusNotFound, message, err)
+	case errors.Is(err, ErrInvalidNode), errors.Is(err, ErrInvalidNamespace), errors.Is(err, ErrInvalidSpace):
+		return httpx.NewError(http.StatusBadRequest, message, err)
+	default:
+		return httpx.NewError(http.StatusInternalServerError, message, err)
 	}
 }
 

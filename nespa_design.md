@@ -270,7 +270,7 @@ Go
 
 - 适合基础设施服务
 - 网络服务开发效率高
-- gRPC、Protobuf、Prometheus、OpenTelemetry 生态成熟
+- TCP 网络服务、HTTP/OpenAPI、Prometheus、OpenTelemetry 生态成熟
 - 部署简单
 - 适合同时实现控制面、frontend、data node 和 SDK
 
@@ -298,10 +298,10 @@ go get github.com/lni/dragonboat/v3@latest
 
 不建议在生产第一版使用 v4 master。
 
-### 5.3 RPC 协议
+### 5.3 数据面协议
 
 ```text
-gRPC + Protobuf
+Nespa TCP Frame
 ```
 
 用于：
@@ -309,8 +309,26 @@ gRPC + Protobuf
 - SDK 到 Frontend
 - Frontend 到 DataNode
 - DataNode 到 DataNode replication
-- Admin 到 ControlPlane
-- ControlPlane watch stream
+
+协议形态：
+
+```text
+fixed-width binary header + JSON metadata + raw payload
+```
+
+选择 TCP frame 的原因：
+
+- 缓存 hot path 避免 HTTP/gRPC 额外开销
+- value payload 不需要 JSON/base64 编码
+- batch set/get 可以用 metadata offset 描述 payload 切片
+- request_id、route_epoch、flags 等控制字段可以固定在 header 中
+- 后续可以演进压缩、批量、流式 watch、replication offset 等能力
+
+边界：
+
+- 控制面写操作、Admin API、Console backend、debug、health 仍使用 HTTP/OpenAPI
+- 控制面 watch 第一阶段可以用 HTTP streaming 或 long polling；需要进入 hot path 时再承载到 TCP frame
+- 协议语义由 Nespa 自己定义，不追求 Redis/gRPC 兼容
 
 ### 5.4 管理 API
 
@@ -442,10 +460,10 @@ github.com/arcgolabs/clientx
 用于：
 
 - 管理 CLI 的 HTTP/TCP client
-- 内部非 gRPC 辅助 client
+- 内部 HTTP/TCP 辅助 client
 - retry / TLS / timeout policy
 
-核心 SDK 的高性能 gRPC client 可以自建，clientx 作为通用辅助库。
+核心 SDK 的高性能 TCP frame client 可以自建，clientx 作为通用辅助库。
 
 ### 5.12 存储辅助库
 
@@ -653,6 +671,19 @@ CreateReindexJob
 CommitReindexJob
 ```
 
+当前 MVP scaffold 先提供内存态 catalog API，用于沉淀控制面对象边界：
+
+```text
+GET  /v1/control/namespaces
+POST /v1/control/namespaces
+POST /v1/control/namespaces/version-bump
+GET  /v1/control/spaces
+POST /v1/control/spaces
+POST /v1/control/spaces/version-bump
+```
+
+`CreateNamespace` 和 `CreateSpace` 语义按未来 FSM 命令设计：同名重复创建为幂等返回，新增对象才推进 revision。生产实现接入 Dragonboat 后，这些 HTTP handler 只负责校验、鉴权和 propose command，不能直接修改状态。
+
 ### 6.5 Deterministic Apply
 
 FSM apply 必须 deterministic。
@@ -815,7 +846,30 @@ type RouteTable struct {
     Epoch uint64
     Assignments []VSlotAssignment
 }
+
+type VSlotAssignment struct {
+    NamespaceID uint64
+    SpaceID     uint64
+    Start       uint32
+    End         uint32
+    Primary     DataNodeID
+    Replicas    []DataNodeID
+}
 ```
+
+MVP scaffold 在 namespace/space 数字 ID 完整落地前，先用 namespace、space、key 字符串做稳定 hash，并在控制面 snapshot 中携带：
+
+```text
+namespace
+space
+vslot_start
+vslot_end
+node_id
+addr
+weight
+```
+
+本地开发模式可以从 healthy DataNode 列表派生临时 RouteTable：按 node_id 排序后均匀切分 `0..65535`。生产控制面必须把 RouteTable 作为显式元数据，经 Raft commit 后发布 revision/watch；不能每次请求动态查询节点状态。
 
 ### 7.4 本地 shard worker
 
@@ -926,31 +980,48 @@ per-shard raft data replication
 
 ### 8.1 基础 KV API
 
-gRPC service：
+数据面使用 Nespa TCP frame。Frame header 固定宽度，metadata 使用 JSON DTO，payload 保存原始 value bytes。
 
-```proto
-service CacheService {
-  rpc Get(GetRequest) returns (GetResponse);
-  rpc Set(SetRequest) returns (SetResponse);
-  rpc Delete(DeleteRequest) returns (DeleteResponse);
-  rpc Exists(ExistsRequest) returns (ExistsResponse);
-  rpc Touch(TouchRequest) returns (TouchResponse);
-  rpc CompareAndSet(CasRequest) returns (CasResponse);
-  rpc BatchGet(BatchGetRequest) returns (BatchGetResponse);
-  rpc BatchSet(BatchSetRequest) returns (BatchSetResponse);
-}
+```text
+magic        uint32  "NSPA"
+version      uint8
+flags        uint8
+op           uint16
+request_id   uint64
+route_epoch  uint64
+metadata_len uint32
+payload_len  uint32
+metadata     []byte
+payload      []byte
+```
+
+MVP ops：
+
+```text
+CacheGet
+CacheSet
+CacheDelete
+CacheBatchGet
+CacheBatchSet
 ```
 
 逻辑 key：
 
-```proto
-message CacheKey {
-  string namespace = 1;
-  string space = 2;
-  string entity = 3;
-  bytes key = 4;
+```json
+{
+  "namespace": "order-service",
+  "space": "order-view",
+  "entity": "OrderView",
+  "key": "order:10086"
 }
 ```
+
+Value 传输规则：
+
+- 单个 set/get：metadata 描述 key、ttl、version，payload 传输 value bytes
+- batch set/get：metadata 内保存 payload_offset/payload_size，payload 拼接多个 value bytes
+- response 使用 flags 区分正常响应和协议错误
+- route_epoch 用于让 Frontend/DataNode 检测客户端路由是否过旧
 
 ### 8.2 SDK 使用示例
 
@@ -1592,6 +1663,12 @@ space.version += 1
 
 新请求读写新 version。
 
+MVP HTTP command：
+
+```text
+POST /v1/control/spaces/version-bump
+```
+
 旧 version 数据：
 
 - 自然 TTL 过期
@@ -1607,6 +1684,14 @@ namespace.version += 1
 ```
 
 所有 space 逻辑失效。
+
+MVP HTTP command：
+
+```text
+POST /v1/control/namespaces/version-bump
+```
+
+Frontend/DataNode 必须从 control snapshot/watch 缓存最新 namespace/space version，并在 cache get/set metadata 中携带版本。DataNode 不扫描删除旧对象，而是用版本可见性过滤让旧数据立即逻辑失效。
 
 ### 14.3 Delete by Query
 
@@ -1813,6 +1898,7 @@ quota policy
 route table
 frontend route cache
 DataNode memory engine
+TCP framed cache transport
 TTL
 space flush by version bump
 namespace flush by version bump
@@ -1836,7 +1922,6 @@ OpenTelemetry tracing
 
 ```text
 Redis compatibility
-custom binary protocol
 JOIN
 aggregation
 continuous query
@@ -1871,7 +1956,7 @@ advanced eviction
 ## 20. Phase 3
 
 ```text
-custom binary protocol
+wire-level compression/multiplexing
 continuous query
 simple aggregation
 geo query
@@ -1956,7 +2041,7 @@ multi-region deployment
 | 数据面一致性 | primary-replica async |
 | 热数据 | memory-first |
 | 本地存储 | Dragonboat 管理 Raft log；storx 可辅助 metadata/cold layer |
-| RPC | gRPC + Protobuf |
+| RPC | Nespa TCP Frame |
 | Admin API | httpx + HTTP/OpenAPI |
 | Auth | authx |
 | Config | configx |

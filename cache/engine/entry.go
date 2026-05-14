@@ -1,6 +1,9 @@
 package engine
 
-import "time"
+import (
+	"encoding/binary"
+	"time"
+)
 
 func newEntry(cmd shardCommand, expireAt time.Time, cost uint64) *entry {
 	return &entry{
@@ -56,7 +59,17 @@ func validateKey(key Key) error {
 }
 
 func physicalKey(key Key) string {
-	return key.Namespace + "\x00" + key.Space + "\x00" + key.Entity + "\x00" + key.Key
+	var raw []byte
+	raw = appendKeyPart(raw, key.Namespace)
+	raw = appendKeyPart(raw, key.Space)
+	raw = appendKeyPart(raw, key.Entity)
+	raw = appendKeyPart(raw, key.Key)
+	return string(raw)
+}
+
+func appendKeyPart(raw []byte, part string) []byte {
+	raw = binary.AppendUvarint(raw, uint64(len(part)))
+	return append(raw, part...)
 }
 
 func spaceKeyOf(key Key) spaceKey {

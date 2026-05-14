@@ -44,6 +44,30 @@ func TestMemoryEngineSetGetCopiesValue(t *testing.T) {
 	}
 }
 
+func TestMemoryEnginePhysicalKeyEncodingAvoidsDelimiterCollision(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 1})
+	defer closeEngine(t, eng)
+
+	left := engine.Key{Namespace: "a", Space: "b\x00c", Key: "d"}
+	right := engine.Key{Namespace: "a", Space: "b", Entity: "c\x00", Key: "d"}
+
+	if _, err := eng.Set(context.Background(), left, []byte("left"), engine.SetOptions{}); err != nil {
+		t.Fatalf("set left: %v", err)
+	}
+	if _, err := eng.Set(context.Background(), right, []byte("right"), engine.SetOptions{}); err != nil {
+		t.Fatalf("set right: %v", err)
+	}
+
+	gotLeft, ok, err := eng.Get(context.Background(), left, engine.GetOptions{})
+	if err != nil || !ok || string(gotLeft.Value) != "left" {
+		t.Fatalf("left value = %q ok=%v err=%v", gotLeft.Value, ok, err)
+	}
+	gotRight, ok, err := eng.Get(context.Background(), right, engine.GetOptions{})
+	if err != nil || !ok || string(gotRight.Value) != "right" {
+		t.Fatalf("right value = %q ok=%v err=%v", gotRight.Value, ok, err)
+	}
+}
+
 func TestMemoryEngineTTL(t *testing.T) {
 	now := time.UnixMilli(1000)
 	eng := engine.NewMemory(engine.Config{ShardCount: 2, Now: func() time.Time { return now }})
