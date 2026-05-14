@@ -223,15 +223,15 @@ key_bytes
         ┌─────────────────────────────────┼─────────────────────────────────┐
         ▼                                 ▼                                 ▼
 ┌────────────────┐              ┌────────────────┐              ┌────────────────┐
-│    Frontend    │              │   Data Node    │              │  Background    │
-│ query coord.   │─────────────▶│ memory engine  │◀────────────▶│ jobs/reindex   │
-│ auth/route     │              │ ttl/eviction   │              │ migration/gc   │
+│  SDK / Client  │              │   Data Node    │              │  Background    │
+│ direct route   │─────────────▶│ memory engine  │◀────────────▶│ jobs/reindex   │
+│ TCP frame      │              │ ttl/eviction   │              │ migration/gc   │
 └────────────────┘              │ local indexes  │              └────────────────┘
         ▲                       └────────────────┘
         │
 ┌───────┴────────┐
-│  SDK / Client  │
-│ Go / Java ...  │
+│    Frontend    │
+│ WebUI/console  │
 └────────────────┘
 ```
 
@@ -241,7 +241,7 @@ key_bytes
 
 ```text
 cmd/nespa-control      控制面节点
-cmd/nespa-frontend     请求入口、query coordinator、auth、routing
+cmd/nespa-frontend     WebUI、console、route/debug view
 cmd/nespa-node         数据节点
 cmd/nespa-admin        管理 API / console backend
 cmd/nespa-cli          命令行工具
@@ -306,8 +306,7 @@ Nespa TCP Frame
 
 用于：
 
-- SDK 到 Frontend
-- Frontend 到 DataNode
+- SDK 到 DataNode direct-route
 - DataNode 到 DataNode replication
 
 协议形态：
@@ -733,7 +732,7 @@ type ControlEvent struct {
 }
 ```
 
-Frontend/DataNode 通过 streaming watch 订阅：
+SDK/Frontend/DataNode 通过 streaming watch 订阅：
 
 ```text
 WatchConfig(since_revision)
@@ -1021,14 +1020,13 @@ Value 传输规则：
 - 单个 set/get：metadata 描述 key、ttl、version，payload 传输 value bytes
 - batch set/get：metadata 内保存 payload_offset/payload_size，payload 拼接多个 value bytes
 - response 使用 flags 区分正常响应和协议错误
-- route_epoch 用于让 Frontend/DataNode 检测客户端路由是否过旧
+- route_epoch 用于让 SDK/DataNode 检测客户端路由是否过旧
 
 ### 8.2 SDK 使用示例
 
 ```go
-client := nespa.Connect(nespa.Config{
-    Endpoint: "nespa.company.internal:7443",
-    Credential: credential,
+client := nespa.NewRoutedTCP(nespa.RoutedConfig{
+    ControlAddr: "http://nespa-control.company.internal:7401",
 })
 
 orders := client.Namespace("order-service").Space("order-view")
@@ -1039,6 +1037,16 @@ err := orders.Set(ctx, "order:10086", payload, nespa.SetOptions{
 })
 
 obj, ok, err := orders.Get(ctx, "order:10086")
+```
+
+SDK direct-route 流程：
+
+```text
+1. SDK 从 ControlPlane 拉取 snapshot/watch
+2. 本地缓存 namespace/space version 与 vslot routes
+3. SDK 根据 namespace/space/key 计算 vslot
+4. SDK 直接向目标 DataNode 发送 TCP frame
+5. cache metadata 携带 namespace_version、space_version，frame header 携带 route_epoch
 ```
 
 ### 8.3 Principal 绑定
@@ -1691,7 +1699,7 @@ MVP HTTP command：
 POST /v1/control/namespaces/version-bump
 ```
 
-Frontend/DataNode 必须从 control snapshot/watch 缓存最新 namespace/space version，并在 cache get/set metadata 中携带版本。DataNode 不扫描删除旧对象，而是用版本可见性过滤让旧数据立即逻辑失效。
+SDK/DataNode 必须从 control snapshot/watch 缓存最新 namespace/space version，并在 cache get/set metadata 中携带版本。DataNode 不扫描删除旧对象，而是用版本可见性过滤让旧数据立即逻辑失效。
 
 ### 14.3 Delete by Query
 
@@ -1897,6 +1905,7 @@ principal/grant
 quota policy
 route table
 frontend route cache
+SDK direct-route mode
 DataNode memory engine
 TCP framed cache transport
 TTL
@@ -1945,7 +1954,6 @@ Bleve text index integration
 async delete by query
 reindex job
 query plan cache
-SDK direct-route mode
 hot key detection
 big key detection
 advanced eviction

@@ -21,6 +21,7 @@ type Key struct {
 type SetRequest struct {
 	Key
 	Value            []byte `json:"-"`
+	RouteEpoch       uint64 `json:"-"`
 	TTLMillis        int64  `json:"ttl_ms,omitempty"`
 	NamespaceVersion uint64 `json:"namespace_version,omitempty"`
 	SpaceVersion     uint64 `json:"space_version,omitempty"`
@@ -30,20 +31,24 @@ type SetRequest struct {
 
 type GetRequest struct {
 	Key
+	RouteEpoch       uint64 `json:"-"`
 	NamespaceVersion uint64 `json:"namespace_version,omitempty"`
 	SpaceVersion     uint64 `json:"space_version,omitempty"`
 }
 
 type DeleteRequest struct {
 	Key
+	RouteEpoch uint64 `json:"-"`
 }
 
 type BatchSetRequest struct {
-	Items []SetRequest `json:"items"`
+	RouteEpoch uint64       `json:"-"`
+	Items      []SetRequest `json:"items"`
 }
 
 type BatchGetRequest struct {
-	Items []GetRequest `json:"items"`
+	RouteEpoch uint64       `json:"-"`
+	Items      []GetRequest `json:"items"`
 }
 
 type Record struct {
@@ -88,7 +93,8 @@ func (e Error) Error() string {
 func PackBatchSet(request BatchSetRequest) (BatchSetRequest, []byte, error) {
 	items := collectionlist.NewListWithCapacity[SetRequest](len(request.Items))
 	payload := make([]byte, 0, payloadSize(request.Items))
-	for _, item := range request.Items {
+	for index := range request.Items {
+		item := request.Items[index]
 		offset, size, err := checkedPayloadRange(len(payload), len(item.Value))
 		if err != nil {
 			return BatchSetRequest{}, nil, err
@@ -99,12 +105,13 @@ func PackBatchSet(request BatchSetRequest) (BatchSetRequest, []byte, error) {
 		item.Value = nil
 		items.Add(item)
 	}
-	return BatchSetRequest{Items: items.Values()}, payload, nil
+	return BatchSetRequest{RouteEpoch: request.RouteEpoch, Items: items.Values()}, payload, nil
 }
 
 func UnpackBatchSet(request BatchSetRequest, payload []byte) ([]SetRequest, error) {
 	items := collectionlist.NewListWithCapacity[SetRequest](len(request.Items))
-	for _, item := range request.Items {
+	for index := range request.Items {
+		item := request.Items[index]
 		value, err := SlicePayload(payload, item.PayloadOffset, item.PayloadSize)
 		if err != nil {
 			return nil, err
@@ -162,8 +169,8 @@ func SlicePayload(payload []byte, offset, size uint32) ([]byte, error) {
 
 func payloadSize(items []SetRequest) int {
 	var total int
-	for _, item := range items {
-		total += len(item.Value)
+	for index := range items {
+		total += len(items[index].Value)
 	}
 	return total
 }

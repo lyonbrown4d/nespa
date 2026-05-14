@@ -1,11 +1,10 @@
 package frontend
 
 import (
-	"encoding/binary"
-	"hash/fnv"
 	"sync"
 
 	"github.com/lyonbrown4d/nespa/controlapi"
+	"github.com/lyonbrown4d/nespa/routing"
 )
 
 type Route struct {
@@ -109,11 +108,7 @@ func (c *RouteCache) SelectKey(namespace, space, key string) (Route, bool) {
 }
 
 func VSlotFor(namespace, space, key string) uint32 {
-	hash := fnv.New64a()
-	writeHashPart(hash, namespace)
-	writeHashPart(hash, space)
-	writeHashPart(hash, key)
-	return uint32(hash.Sum64() % uint64(controlapi.VSlotCount))
+	return routing.VSlotFor(namespace, space, key)
 }
 
 type routeMatch uint8
@@ -145,7 +140,10 @@ func selectMatch(route *Route, namespace, space string, vslot uint32) routeMatch
 }
 
 func (r Route) ContainsVSlot(vslot uint32) bool {
-	return vslot >= r.VSlotStart && vslot <= r.VSlotEnd
+	return routing.ContainsVSlot(controlapi.RouteBody{
+		VSlotStart: r.VSlotStart,
+		VSlotEnd:   r.VSlotEnd,
+	}, vslot)
 }
 
 func firstRoute(routes ...*Route) (Route, bool) {
@@ -172,15 +170,4 @@ func normalizeRoutes(routes []Route) []Route {
 		}
 	}
 	return out
-}
-
-func writeHashPart(hash interface{ Write([]byte) (int, error) }, value string) {
-	var size []byte
-	size = binary.AppendUvarint(size, uint64(len(value)))
-	if _, err := hash.Write(size); err != nil {
-		return
-	}
-	if _, err := hash.Write([]byte(value)); err != nil {
-		return
-	}
 }

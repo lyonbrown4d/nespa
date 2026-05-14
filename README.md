@@ -97,6 +97,10 @@ The data plane uses a TCP framed protocol between cache transports. HTTP remains
 for control APIs, the Fiber-template frontend WebUI, admin, debug, health, and
 console APIs.
 
+SDK hot-path cache operations use direct-route mode: the SDK reads the control
+snapshot over HTTP, caches catalog versions and vslot routes locally, then sends
+cache frames directly to the selected DataNode TCP address.
+
 The current frame header is fixed-width and big-endian:
 
 ```text
@@ -116,9 +120,11 @@ payload      []byte
 raw cache value bytes. Batch set/get uses payload offsets in metadata so values
 do not need to be JSON encoded. The codec lives in `protocol`.
 
-The public TCP client SDK lives in `client` and uses `transport/tcp` underneath;
-the transport client uses `github.com/arcgolabs/clientx/tcp` for dialing,
-timeouts, and client policies.
+The public TCP client SDK lives in `client` and uses `transport/tcp` underneath.
+Use `client.NewTCP` for a direct single-node TCP client, or `client.NewRoutedTCP`
+to resolve routes from the control plane and connect directly to DataNodes. The
+transport client uses `github.com/arcgolabs/clientx/tcp` for dialing, timeouts,
+and client policies.
 
 ## Verify
 

@@ -106,7 +106,13 @@ func (c *Client) do(ctx context.Context, addr string, op protocol.Op, metadata a
 	}
 
 	requestID := c.nextID.Add(1)
-	if encodeErr := c.codec.Encode(conn, protocol.Frame{Op: op, RequestID: requestID, Metadata: raw, Payload: payload}); encodeErr != nil {
+	if encodeErr := c.codec.Encode(conn, protocol.Frame{
+		Op:         op,
+		RequestID:  requestID,
+		RouteEpoch: routeEpoch(metadata),
+		Metadata:   raw,
+		Payload:    payload,
+	}); encodeErr != nil {
 		return protocol.Frame{}, fmt.Errorf("write cache frame: %w", encodeErr)
 	}
 
@@ -121,6 +127,23 @@ func (c *Client) do(ctx context.Context, addr string, op protocol.Op, metadata a
 		return protocol.Frame{}, decodeError(frame)
 	}
 	return frame, nil
+}
+
+func routeEpoch(metadata any) uint64 {
+	switch item := metadata.(type) {
+	case cachewire.SetRequest:
+		return item.RouteEpoch
+	case cachewire.GetRequest:
+		return item.RouteEpoch
+	case cachewire.DeleteRequest:
+		return item.RouteEpoch
+	case cachewire.BatchSetRequest:
+		return item.RouteEpoch
+	case cachewire.BatchGetRequest:
+		return item.RouteEpoch
+	default:
+		return 0
+	}
 }
 
 func (c *Client) dial(ctx context.Context, addr string) (io.ReadWriteCloser, error) {

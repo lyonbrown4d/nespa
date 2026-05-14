@@ -62,7 +62,8 @@ func keyFromWire(key cachewire.Key) cache.Key {
 
 func batchSetRequests(items []cachewire.SetRequest) []cache.SetRequest {
 	requests := make([]cache.SetRequest, 0, len(items))
-	for _, item := range items {
+	for index := range items {
+		item := items[index]
 		requests = append(requests, cache.SetRequest{
 			Key:   keyFromWire(item.Key),
 			Value: item.Value,
