@@ -1024,7 +1024,7 @@ Value 传输规则：
 - 单 key op：metadata 使用 binary codec 描述 key、ttl、version、found/deleted/touched 等字段，payload 传输 value bytes
 - batch set/get：metadata 使用 binary codec 保存 payload_offset/payload_size，payload 拼接多个 value bytes
 - response 使用 flags 区分正常响应和协议错误；协议错误 frame 在 MVP 阶段仍使用 `cachewire.Error` JSON metadata
-- route_epoch 用于让 SDK/DataNode 检测客户端路由是否过旧；MVP 中 DataNode 对非 0 且小于本节点已观测 control revision 的请求返回 `ErrorNoRoute`
+- route_epoch 用于让 SDK/DataNode 检测客户端路由是否过旧；MVP 中 DataNode 对非 0 且小于本节点已观测 control revision 的请求返回 `ErrorNoRoute`，routed SDK 收到该错误后刷新 snapshot 并重试一次
 
 ### 8.2 SDK 使用示例
 
@@ -1051,6 +1051,7 @@ SDK direct-route 流程：
 3. SDK 根据 namespace/space/key 计算 vslot
 4. SDK 直接向目标 DataNode 发送 TCP frame
 5. cache metadata 携带 namespace_version、space_version，frame header 携带 route_epoch
+6. 如果 DataNode 返回 stale route `ErrorNoRoute`，SDK refresh snapshot 后最多重试一次
 ```
 
 ### 8.3 Principal 绑定

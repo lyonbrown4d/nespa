@@ -8,6 +8,7 @@ import (
 
 	"github.com/lyonbrown4d/nespa/cachewire"
 	"github.com/lyonbrown4d/nespa/controlapi"
+	"github.com/lyonbrown4d/nespa/protocol"
 	"github.com/lyonbrown4d/nespa/routing"
 	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
 )
@@ -60,12 +61,11 @@ func (c *RoutedTCPClient) Refresh(ctx context.Context) error {
 }
 
 func (c *RoutedTCPClient) Set(ctx context.Context, request cachewire.SetRequest) (cachewire.Record, error) {
-	decision, err := c.resolve(ctx, request.Key)
-	if err != nil {
-		return cachewire.Record{}, err
-	}
-	stampSetRequest(&request, decision)
-	record, err := c.transport.Set(ctx, decision.addr, request)
+	record, err := sendWithRouteRetry(ctx, c, request.Key, func(decision routeDecision) (cachewire.Record, error) {
+		next := request
+		stampSetRequest(&next, decision)
+		return c.transport.Set(ctx, decision.addr, next)
+	})
 	if err != nil {
 		return cachewire.Record{}, fmt.Errorf("set routed cache record: %w", err)
 	}
@@ -73,12 +73,11 @@ func (c *RoutedTCPClient) Set(ctx context.Context, request cachewire.SetRequest)
 }
 
 func (c *RoutedTCPClient) Get(ctx context.Context, request cachewire.GetRequest) (cachewire.Record, error) {
-	decision, err := c.resolve(ctx, request.Key)
-	if err != nil {
-		return cachewire.Record{}, err
-	}
-	stampGetRequest(&request, decision)
-	record, err := c.transport.Get(ctx, decision.addr, request)
+	record, err := sendWithRouteRetry(ctx, c, request.Key, func(decision routeDecision) (cachewire.Record, error) {
+		next := request
+		stampGetRequest(&next, decision)
+		return c.transport.Get(ctx, decision.addr, next)
+	})
 	if err != nil {
 		return cachewire.Record{}, fmt.Errorf("get routed cache record: %w", err)
 	}
@@ -86,12 +85,11 @@ func (c *RoutedTCPClient) Get(ctx context.Context, request cachewire.GetRequest)
 }
 
 func (c *RoutedTCPClient) Delete(ctx context.Context, request cachewire.DeleteRequest) (cachewire.DeleteResponse, error) {
-	decision, err := c.resolve(ctx, request.Key)
-	if err != nil {
-		return cachewire.DeleteResponse{}, err
-	}
-	request.RouteEpoch = decision.routeEpoch
-	response, err := c.transport.Delete(ctx, decision.addr, request)
+	response, err := sendWithRouteRetry(ctx, c, request.Key, func(decision routeDecision) (cachewire.DeleteResponse, error) {
+		next := request
+		next.RouteEpoch = decision.routeEpoch
+		return c.transport.Delete(ctx, decision.addr, next)
+	})
 	if err != nil {
 		return cachewire.DeleteResponse{}, fmt.Errorf("delete routed cache record: %w", err)
 	}
@@ -99,12 +97,11 @@ func (c *RoutedTCPClient) Delete(ctx context.Context, request cachewire.DeleteRe
 }
 
 func (c *RoutedTCPClient) Exists(ctx context.Context, request cachewire.ExistsRequest) (cachewire.ExistsResponse, error) {
-	decision, err := c.resolve(ctx, request.Key)
-	if err != nil {
-		return cachewire.ExistsResponse{}, err
-	}
-	stampExistsRequest(&request, decision)
-	response, err := c.transport.Exists(ctx, decision.addr, request)
+	response, err := sendWithRouteRetry(ctx, c, request.Key, func(decision routeDecision) (cachewire.ExistsResponse, error) {
+		next := request
+		stampExistsRequest(&next, decision)
+		return c.transport.Exists(ctx, decision.addr, next)
+	})
 	if err != nil {
 		return cachewire.ExistsResponse{}, fmt.Errorf("check routed cache record: %w", err)
 	}
@@ -112,16 +109,51 @@ func (c *RoutedTCPClient) Exists(ctx context.Context, request cachewire.ExistsRe
 }
 
 func (c *RoutedTCPClient) Touch(ctx context.Context, request cachewire.TouchRequest) (cachewire.TouchResponse, error) {
-	decision, err := c.resolve(ctx, request.Key)
-	if err != nil {
-		return cachewire.TouchResponse{}, err
-	}
-	stampTouchRequest(&request, decision)
-	response, err := c.transport.Touch(ctx, decision.addr, request)
+	response, err := sendWithRouteRetry(ctx, c, request.Key, func(decision routeDecision) (cachewire.TouchResponse, error) {
+		next := request
+		stampTouchRequest(&next, decision)
+		return c.transport.Touch(ctx, decision.addr, next)
+	})
 	if err != nil {
 		return cachewire.TouchResponse{}, fmt.Errorf("touch routed cache record: %w", err)
 	}
 	return response, nil
+}
+
+func sendWithRouteRetry[T any](
+	ctx context.Context,
+	client *RoutedTCPClient,
+	key cachewire.Key,
+	send func(routeDecision) (T, error),
+) (T, error) {
+	response, err := sendWithCurrentRoute(ctx, client, key, send)
+	if err == nil || !isWireNoRoute(err) {
+		return response, err
+	}
+	if refreshErr := client.Refresh(ctx); refreshErr != nil {
+		var zero T
+		return zero, fmt.Errorf("refresh routed cache snapshot: %w", refreshErr)
+	}
+	return sendWithCurrentRoute(ctx, client, key, send)
+}
+
+func sendWithCurrentRoute[T any](
+	ctx context.Context,
+	client *RoutedTCPClient,
+	key cachewire.Key,
+	send func(routeDecision) (T, error),
+) (T, error) {
+	decision, err := client.resolve(ctx, key)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return send(decision)
+}
+
+func isWireNoRoute(err error) bool {
+	var wireErr cachewire.Error
+	return errors.As(err, &wireErr) && wireErr.Code == protocol.ErrorNoRoute
 }
 
 func (c *RoutedTCPClient) resolve(ctx context.Context, key cachewire.Key) (routeDecision, error) {

@@ -75,11 +75,28 @@ func routedBatch[T any](
 	if count == 0 {
 		return nil, nil
 	}
+	records, err := runRoutedBatchWithCurrentSnapshot(ctx, client, count, group, send, copyRecords)
+	if err == nil || !isWireNoRoute(err) {
+		return records, err
+	}
+	if refreshErr := client.Refresh(ctx); refreshErr != nil {
+		return nil, fmt.Errorf("refresh routed cache snapshot: %w", refreshErr)
+	}
+	return runRoutedBatchWithCurrentSnapshot(ctx, client, count, group, send, copyRecords)
+}
+
+func runRoutedBatchWithCurrentSnapshot[T any](
+	ctx context.Context,
+	client *RoutedTCPClient,
+	count int,
+	group func(controlapi.SnapshotBody) (map[string][]T, error),
+	send func(uint64, string, []T) ([]cachewire.Record, error),
+	copyRecords func([]cachewire.Record, []T, []cachewire.Record),
+) ([]cachewire.Record, error) {
 	snapshot, err := client.currentSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	groups, err := group(snapshot)
 	if err != nil {
 		return nil, err
