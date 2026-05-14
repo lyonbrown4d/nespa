@@ -42,9 +42,50 @@ func TestControlStateCreateSpaceRequiresNamespace(t *testing.T) {
 	}
 }
 
+func TestControlStateCreatesEntityMetadata(t *testing.T) {
+	state := control.NewControlStateWithClock("test", func() time.Time { return time.Unix(123, 0) })
+	createOrdersSession(t, state)
+
+	entity, err := state.CreateEntity(" orders ", " session ", " OrderView ")
+	if err != nil {
+		t.Fatalf("create entity: %v", err)
+	}
+	assertEntityResponse(t, entity, 3, "orders", "session", "OrderView", 123)
+
+	again, err := state.CreateEntity("orders", "session", "OrderView")
+	if err != nil {
+		t.Fatalf("create entity again: %v", err)
+	}
+	assertEntityResponse(t, again, 3, "orders", "session", "OrderView", 123)
+
+	requireEntityCount(t, state.Entities(), 1)
+	snapshot := state.Snapshot()
+	requireEntityCount(t, controlapi.EntitiesBody{Entities: snapshot.Entities}, 1)
+	if snapshot.Entities[0] != entity.Entity {
+		t.Fatalf("snapshot entity = %+v, want %+v", snapshot.Entities[0], entity.Entity)
+	}
+}
+
+func TestControlStateCreateEntityRequiresExistingSpace(t *testing.T) {
+	state := control.NewControlState("test")
+
+	_, err := state.CreateEntity("orders", "session", "OrderView")
+	if !errors.Is(err, control.ErrNamespaceNotFound) {
+		t.Fatalf("namespace err = %v, want ErrNamespaceNotFound", err)
+	}
+
+	if _, createErr := state.CreateNamespace("orders"); createErr != nil {
+		t.Fatalf("create namespace: %v", createErr)
+	}
+	_, err = state.CreateEntity("orders", "session", "OrderView")
+	if !errors.Is(err, control.ErrSpaceNotFound) {
+		t.Fatalf("space err = %v, want ErrSpaceNotFound", err)
+	}
+}
+
 func TestControlStateBumpsNamespaceAndSpaceVersions(t *testing.T) {
 	state := control.NewControlState("test")
-	createNamespaceAndSpace(t, state, "orders", "session")
+	createOrdersSession(t, state)
 
 	namespace, err := state.BumpNamespaceVersion("orders")
 	if err != nil {
@@ -113,11 +154,31 @@ func TestControlStateRejectsInvalidCatalogNames(t *testing.T) {
 	}
 }
 
+func TestControlStateRejectsInvalidEntityNames(t *testing.T) {
+	state := control.NewControlState("test")
+	createOrdersSession(t, state)
+
+	for _, test := range []struct {
+		name   string
+		entity string
+	}{
+		{name: "empty entity", entity: ""},
+		{name: "slash entity", entity: "bad/entity"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := state.CreateEntity("orders", "session", test.entity)
+			if !errors.Is(err, control.ErrInvalidEntity) {
+				t.Fatalf("err = %v, want ErrInvalidEntity", err)
+			}
+		})
+	}
+}
+
 func TestControlStateSnapshotBuildsSpaceScopedRoutes(t *testing.T) {
 	state := control.NewControlState("test")
 	registerNode(t, state)
 	registerSpecificNode(t, state, "node-2", "127.0.0.1:7503")
-	createNamespaceAndSpace(t, state, "orders", "session")
+	createOrdersSession(t, state)
 
 	snapshot := state.Snapshot()
 	requireCatalogCounts(t,
@@ -147,12 +208,25 @@ func assertSpaceResponse(t *testing.T, response controlapi.CreateSpaceResponse, 
 	}
 }
 
-func createNamespaceAndSpace(t *testing.T, state *control.ControlState, namespace, space string) {
+func assertEntityResponse(t *testing.T, response controlapi.CreateEntityResponse, revision uint64, namespace, space, entity string, createdAtUnix int64) {
 	t.Helper()
-	if _, err := state.CreateNamespace(namespace); err != nil {
+	if response.Revision != revision {
+		t.Fatalf("entity revision = %d, want %d", response.Revision, revision)
+	}
+	if response.Entity.Namespace != namespace || response.Entity.Space != space || response.Entity.Entity != entity {
+		t.Fatalf("unexpected entity response: %+v", response)
+	}
+	if response.Entity.CreatedAtUnix != createdAtUnix {
+		t.Fatalf("entity created_at_unix = %d, want %d", response.Entity.CreatedAtUnix, createdAtUnix)
+	}
+}
+
+func createOrdersSession(t *testing.T, state *control.ControlState) {
+	t.Helper()
+	if _, err := state.CreateNamespace("orders"); err != nil {
 		t.Fatalf("create namespace: %v", err)
 	}
-	if _, err := state.CreateSpace(namespace, space); err != nil {
+	if _, err := state.CreateSpace("orders", "session"); err != nil {
 		t.Fatalf("create space: %v", err)
 	}
 }
@@ -164,6 +238,13 @@ func requireCatalogCounts(t *testing.T, namespaces controlapi.NamespacesBody, sp
 	}
 	if len(spaces.Spaces) != wantSpaces {
 		t.Fatalf("spaces len = %d, want %d: %+v", len(spaces.Spaces), wantSpaces, spaces.Spaces)
+	}
+}
+
+func requireEntityCount(t *testing.T, entities controlapi.EntitiesBody, wantEntities int) {
+	t.Helper()
+	if len(entities.Entities) != wantEntities {
+		t.Fatalf("entities len = %d, want %d: %+v", len(entities.Entities), wantEntities, entities.Entities)
 	}
 }
 

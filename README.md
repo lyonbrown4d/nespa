@@ -49,6 +49,7 @@ curl http://127.0.0.1:7401/v1/control/state
 curl http://127.0.0.1:7401/v1/control/snapshot
 curl http://127.0.0.1:7401/v1/control/namespaces
 curl http://127.0.0.1:7401/v1/control/spaces
+curl http://127.0.0.1:7401/v1/control/entities
 curl http://127.0.0.1:7401/v1/control/nodes
 curl http://127.0.0.1:7402/routes
 ```
@@ -63,6 +64,10 @@ curl -X POST http://127.0.0.1:7401/v1/control/namespaces \
 curl -X POST http://127.0.0.1:7401/v1/control/spaces \
   -H 'content-type: application/json' \
   -d '{"namespace":"orders","space":"session"}'
+
+curl -X POST http://127.0.0.1:7401/v1/control/entities \
+  -H 'content-type: application/json' \
+  -d '{"namespace":"orders","space":"session","entity":"SessionView"}'
 ```
 
 Flush by version bump:

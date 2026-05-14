@@ -9,10 +9,10 @@ require (
 	github.com/arcgolabs/configx v0.3.2
 	github.com/arcgolabs/dix v0.10.0
 	github.com/arcgolabs/eventx v0.1.2
-	github.com/arcgolabs/httpx v0.1.5
-	github.com/arcgolabs/httpx/adapter/fiber v0.1.1
+	github.com/arcgolabs/httpx v0.1.6
+	github.com/arcgolabs/httpx/adapter/fiber v0.1.6
 	github.com/arcgolabs/logx v0.1.2
-	github.com/gofiber/fiber/v2 v2.52.12
+	github.com/gofiber/fiber/v2 v2.52.13
 	github.com/gofiber/template/html/v2 v2.1.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

@@ -11,6 +11,12 @@ type spaceRef struct {
 	space     string
 }
 
+type entityRef struct {
+	namespace string
+	space     string
+	entity    string
+}
+
 func (s *ControlState) CreateNamespace(namespace string) (controlapi.CreateNamespaceResponse, error) {
 	namespace, err := normalizeNamespace(namespace)
 	if err != nil {
@@ -66,6 +72,41 @@ func (s *ControlState) CreateSpace(namespace, space string) (controlapi.CreateSp
 	return controlapi.CreateSpaceResponse{
 		Revision: s.revision,
 		Space:    item,
+	}, nil
+}
+
+func (s *ControlState) CreateEntity(namespace, space, entity string) (controlapi.CreateEntityResponse, error) {
+	namespace, space, entity, err := normalizeEntityIdentity(namespace, space, entity)
+	if err != nil {
+		return controlapi.CreateEntityResponse{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.namespaces.Get(namespace); !exists {
+		return controlapi.CreateEntityResponse{}, namespaceNotFound(namespace)
+	}
+	if _, exists := s.spaces.Get(spaceRef{namespace: namespace, space: space}); !exists {
+		return controlapi.CreateEntityResponse{}, spaceNotFound(namespace, space)
+	}
+
+	ref := entityRef{namespace: namespace, space: space, entity: entity}
+	item, exists := s.entities.Get(ref)
+	if !exists {
+		s.revision++
+		item = controlapi.EntityBody{
+			Namespace:     namespace,
+			Space:         space,
+			Entity:        entity,
+			CreatedAtUnix: s.now().Unix(),
+		}
+		s.entities.Set(ref, item)
+	}
+
+	return controlapi.CreateEntityResponse{
+		Revision: s.revision,
+		Entity:   item,
 	}, nil
 }
 
@@ -139,6 +180,16 @@ func (s *ControlState) Spaces() controlapi.SpacesBody {
 	}
 }
 
+func (s *ControlState) Entities() controlapi.EntitiesBody {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return controlapi.EntitiesBody{
+		Revision: s.revision,
+		Entities: s.sortedEntitiesLocked(),
+	}
+}
+
 func (s *ControlState) sortedNamespacesLocked() []controlapi.NamespaceBody {
 	namespaces := s.namespaces.Values()
 	sort.Slice(namespaces, func(i, j int) bool {
@@ -156,4 +207,19 @@ func (s *ControlState) sortedSpacesLocked() []controlapi.SpaceBody {
 		return spaces[i].Namespace < spaces[j].Namespace
 	})
 	return spaces
+}
+
+func (s *ControlState) sortedEntitiesLocked() []controlapi.EntityBody {
+	entities := s.entities.Values()
+	sort.Slice(entities, func(i, j int) bool {
+		switch {
+		case entities[i].Namespace != entities[j].Namespace:
+			return entities[i].Namespace < entities[j].Namespace
+		case entities[i].Space != entities[j].Space:
+			return entities[i].Space < entities[j].Space
+		default:
+			return entities[i].Entity < entities[j].Entity
+		}
+	})
+	return entities
 }

@@ -22,6 +22,7 @@ type ControlState struct {
 	revision   uint64
 	namespaces *collectionmapping.Map[string, controlapi.NamespaceBody]
 	spaces     *collectionmapping.Map[spaceRef, controlapi.SpaceBody]
+	entities   *collectionmapping.Map[entityRef, controlapi.EntityBody]
 	nodes      *collectionmapping.Map[string, controlapi.NodeBody]
 	now        func() time.Time
 }
@@ -43,6 +44,7 @@ func NewControlStateWithClock(clusterID string, now func() time.Time) *ControlSt
 		clusterID:  clusterID,
 		namespaces: collectionmapping.NewMap[string, controlapi.NamespaceBody](),
 		spaces:     collectionmapping.NewMap[spaceRef, controlapi.SpaceBody](),
+		entities:   collectionmapping.NewMap[entityRef, controlapi.EntityBody](),
 		nodes:      collectionmapping.NewMap[string, controlapi.NodeBody](),
 		now:        now,
 	}
@@ -175,6 +177,7 @@ func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 	nodes := s.sortedNodesLocked()
 	namespaces := s.sortedNamespacesLocked()
 	spaces := s.sortedSpacesLocked()
+	entities := s.sortedEntitiesLocked()
 
 	return controlapi.SnapshotBody{
 		ClusterID:  s.clusterID,
@@ -182,6 +185,7 @@ func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 		Mode:       controlModeBootstrap,
 		Namespaces: namespaces,
 		Spaces:     spaces,
+		Entities:   entities,
 		Nodes:      nodes,
 		Routes:     routesForNodes(nodes, spaces),
 	}

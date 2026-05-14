@@ -15,19 +15,21 @@ import (
 )
 
 type HTTPConfig struct {
-	Name     string
-	Addr     string
-	Metadata map[string]string
-	Routes   func(httpx.ServerRuntime)
-	Adapter  func() adapter.Host
+	Name      string
+	Addr      string
+	Metadata  map[string]string
+	Routes    func(httpx.ServerRuntime)
+	Endpoints []httpx.Endpoint
+	Adapter   func() adapter.Host
 }
 
 type HTTPService struct {
-	name     string
-	addr     string
-	metadata map[string]string
-	routes   func(httpx.ServerRuntime)
-	adapter  func() adapter.Host
+	name      string
+	addr      string
+	metadata  map[string]string
+	routes    func(httpx.ServerRuntime)
+	endpoints []httpx.Endpoint
+	adapter   func() adapter.Host
 
 	mu     sync.Mutex
 	server httpx.ServerRuntime
@@ -37,13 +39,16 @@ type HTTPService struct {
 func NewHTTPService(cfg HTTPConfig) *HTTPService {
 	metadata := make(map[string]string, len(cfg.Metadata))
 	maps.Copy(metadata, cfg.Metadata)
+	endpoints := make([]httpx.Endpoint, len(cfg.Endpoints))
+	copy(endpoints, cfg.Endpoints)
 
 	return &HTTPService{
-		name:     cfg.Name,
-		addr:     cfg.Addr,
-		metadata: metadata,
-		routes:   cfg.Routes,
-		adapter:  cfg.Adapter,
+		name:      cfg.Name,
+		addr:      cfg.Addr,
+		metadata:  metadata,
+		routes:    cfg.Routes,
+		endpoints: endpoints,
+		adapter:   cfg.Adapter,
 	}
 }
 
@@ -70,6 +75,9 @@ func (s *HTTPService) Start(ctx context.Context, logger *slog.Logger, bus eventx
 	s.registerBaseRoutes(server)
 	if s.routes != nil {
 		s.routes(server)
+	}
+	for _, endpoint := range s.endpoints {
+		server.RegisterOnly(endpoint)
 	}
 
 	errCh := make(chan error, 1)

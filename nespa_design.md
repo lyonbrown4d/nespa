@@ -174,6 +174,8 @@ UserProfileView
 
 只有 queryable space 才需要 entity schema。普通 KV cache space 可以不启用 entity/query 能力。
 
+MVP 阶段 entity 先作为 control-plane catalog 元数据落地，记录 `namespace/space/entity` 和创建时间，并通过 control snapshot 下发给 SDK/DataNode。Schema、index、typed query 是 entity 之上的后续能力，不能和第一阶段的 entity 声明混在同一个状态对象里。
+
 ### 3.5 Key
 
 Key 是最小缓存对象标识。
@@ -654,6 +656,7 @@ BumpNamespaceVersion
 CreateSpace
 UpdateSpacePolicy
 BumpSpaceVersion
+CreateEntity
 CreateEntitySchema
 UpdateEntitySchema
 CreateIndexSchema
@@ -681,9 +684,13 @@ POST /v1/control/namespaces/version-bump
 GET  /v1/control/spaces
 POST /v1/control/spaces
 POST /v1/control/spaces/version-bump
+GET  /v1/control/entities
+POST /v1/control/entities
 ```
 
-`CreateNamespace` 和 `CreateSpace` 语义按未来 FSM 命令设计：同名重复创建为幂等返回，新增对象才推进 revision。生产实现接入 Dragonboat 后，这些 HTTP handler 只负责校验、鉴权和 propose command，不能直接修改状态。
+`CreateNamespace`、`CreateSpace` 和 `CreateEntity` 语义按未来 FSM 命令设计：同名重复创建为幂等返回，新增对象才推进 revision。`CreateEntity` 必须引用已存在的 namespace 和 space；第一阶段只声明 entity catalog，不包含 Redis 数据结构兼容、schema DSL、index schema 或 query planner。生产实现接入 Dragonboat 后，这些 HTTP handler 只负责校验、鉴权和 propose command，不能直接修改状态。
+
+HTTP API 在代码组织上按 `httpx.Endpoint` 拆分，endpoint 通过 `dix` contribution 注入到服务专属集合，再由 HTTP module 启动时统一注册。这样 control/admin 的路由注册保持声明式，后续新增 schema、query、migration endpoint 时只需要新增 endpoint contribution，不修改统一启动逻辑。
 
 ### 6.5 Deterministic Apply
 

@@ -9,6 +9,7 @@ import (
 var (
 	ErrInvalidNamespace  = errors.New("control: invalid namespace")
 	ErrInvalidSpace      = errors.New("control: invalid space")
+	ErrInvalidEntity     = errors.New("control: invalid entity")
 	ErrNamespaceNotFound = errors.New("control: namespace not found")
 	ErrSpaceNotFound     = errors.New("control: space not found")
 )
@@ -31,6 +32,18 @@ func normalizeSpaceIdentity(namespace, space string) (string, string, error) {
 		return "", "", err
 	}
 	return namespace, space, nil
+}
+
+func normalizeEntityIdentity(namespace, space, entity string) (string, string, string, error) {
+	namespace, space, err := normalizeSpaceIdentity(namespace, space)
+	if err != nil {
+		return "", "", "", err
+	}
+	entity = strings.TrimSpace(entity)
+	if err := validateCatalogName(entity, ErrInvalidEntity); err != nil {
+		return "", "", "", err
+	}
+	return namespace, space, entity, nil
 }
 
 func validateCatalogName(name string, kind error) error {

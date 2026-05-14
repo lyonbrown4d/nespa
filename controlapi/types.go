@@ -32,6 +32,13 @@ type SpaceBody struct {
 	CreatedAtUnix int64  `json:"created_at_unix"`
 }
 
+type EntityBody struct {
+	Namespace     string `json:"namespace"`
+	Space         string `json:"space"`
+	Entity        string `json:"entity"`
+	CreatedAtUnix int64  `json:"created_at_unix"`
+}
+
 type RouteBody struct {
 	Namespace  string `json:"namespace,omitempty"`
 	Space      string `json:"space,omitempty"`
@@ -48,6 +55,7 @@ type SnapshotBody struct {
 	Mode       string          `json:"mode"`
 	Namespaces []NamespaceBody `json:"namespaces,omitempty"`
 	Spaces     []SpaceBody     `json:"spaces,omitempty"`
+	Entities   []EntityBody    `json:"entities,omitempty"`
 	Nodes      []NodeBody      `json:"nodes"`
 	Routes     []RouteBody     `json:"routes"`
 }
@@ -65,6 +73,11 @@ type NamespacesBody struct {
 type SpacesBody struct {
 	Revision uint64      `json:"revision"`
 	Spaces   []SpaceBody `json:"spaces"`
+}
+
+type EntitiesBody struct {
+	Revision uint64       `json:"revision"`
+	Entities []EntityBody `json:"entities"`
 }
 
 type CreateNamespaceInput struct {
@@ -119,6 +132,21 @@ type BumpSpaceVersionBody struct {
 type BumpSpaceVersionResponse struct {
 	Revision uint64    `json:"revision"`
 	Space    SpaceBody `json:"space"`
+}
+
+type CreateEntityInput struct {
+	Body CreateEntityBody
+}
+
+type CreateEntityBody struct {
+	Namespace string `json:"namespace"`
+	Space     string `json:"space"`
+	Entity    string `json:"entity"`
+}
+
+type CreateEntityResponse struct {
+	Revision uint64     `json:"revision"`
+	Entity   EntityBody `json:"entity"`
 }
 
 type RegisterNodeInput struct {
