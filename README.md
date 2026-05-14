@@ -122,7 +122,9 @@ payload      []byte
 
 `metadata` carries `cachewire` DTOs and protocol errors, while `payload` carries
 raw cache value bytes. Batch set/get uses payload offsets in metadata so values
-do not need to be JSON encoded. The codec lives in `protocol`.
+do not need to be JSON encoded. DataNodes reject non-zero `route_epoch` values
+older than the node's latest observed control revision. The codec lives in
+`protocol`.
 
 The public TCP client SDK lives in `client` and uses `transport/tcp` underneath.
 Use `client.NewTCP` for a direct single-node TCP client, or `client.NewRoutedTCP`

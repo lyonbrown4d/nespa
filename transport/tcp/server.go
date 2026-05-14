@@ -16,13 +16,15 @@ import (
 )
 
 type ServerConfig struct {
-	Addr string
+	Addr              string
+	CurrentRouteEpoch func() uint64
 }
 
 type Server struct {
-	addr    string
-	service cache.Service
-	codec   *protocol.Codec
+	addr              string
+	service           cache.Service
+	codec             *protocol.Codec
+	currentRouteEpoch func() uint64
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -31,9 +33,10 @@ type Server struct {
 
 func NewServer(cfg ServerConfig, service cache.Service) *Server {
 	return &Server{
-		addr:    cfg.Addr,
-		service: service,
-		codec:   protocol.NewCodec(),
+		addr:              cfg.Addr,
+		service:           service,
+		codec:             protocol.NewCodec(),
+		currentRouteEpoch: cfg.CurrentRouteEpoch,
 	}
 }
 
@@ -123,6 +126,13 @@ func (s *Server) serveConn(ctx context.Context, logger *slog.Logger, conn net.Co
 }
 
 func (s *Server) handleFrame(ctx context.Context, frame protocol.Frame) protocol.Frame {
+	if stale, current := s.staleRoute(frame.RouteEpoch); stale {
+		return errorFrame(frame, protocol.ErrorNoRoute, fmt.Errorf("stale route epoch %d < %d", frame.RouteEpoch, current))
+	}
+	return s.dispatchFrame(ctx, frame)
+}
+
+func (s *Server) dispatchFrame(ctx context.Context, frame protocol.Frame) protocol.Frame {
 	switch frame.Op {
 	case protocol.OpCacheSet:
 		return s.handleSet(ctx, frame)
@@ -143,6 +153,14 @@ func (s *Server) handleFrame(ctx context.Context, frame protocol.Frame) protocol
 	default:
 		return errorFrame(frame, protocol.ErrorBadFrame, fmt.Errorf("unsupported cache op %d", frame.Op))
 	}
+}
+
+func (s *Server) staleRoute(routeEpoch uint64) (bool, uint64) {
+	if routeEpoch == 0 || s.currentRouteEpoch == nil {
+		return false, 0
+	}
+	current := s.currentRouteEpoch()
+	return current > 0 && routeEpoch < current, current
 }
 
 func (s *Server) handleSet(ctx context.Context, frame protocol.Frame) protocol.Frame {

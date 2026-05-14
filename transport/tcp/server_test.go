@@ -149,6 +149,37 @@ func TestClientServerTouchHonorsVersions(t *testing.T) {
 	}
 }
 
+func TestClientServerRejectsStaleRouteEpoch(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{
+		Addr:              "127.0.0.1:0",
+		CurrentRouteEpoch: func() uint64 { return 2 },
+	}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	_, err := client.Get(ctx, server.Addr(), cachewire.GetRequest{
+		Key:        cachewire.Key{Namespace: "ns", Space: "sp", Key: "k"},
+		RouteEpoch: 1,
+	})
+	if err == nil {
+		t.Fatal("expected stale route epoch error")
+	}
+	wireErr, ok := errors.AsType[cachewire.Error](err)
+	if !ok {
+		t.Fatalf("expected cachewire.Error, got %T", err)
+	}
+	if wireErr.Code != protocol.ErrorNoRoute {
+		t.Fatalf("unexpected error code: %d", wireErr.Code)
+	}
+}
+
 func TestClientServerBatchSetGet(t *testing.T) {
 	eng := engine.NewMemory(engine.Config{ShardCount: 2})
 	defer closeEngine(t, eng)

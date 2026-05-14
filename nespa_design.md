@@ -1024,7 +1024,7 @@ Value 传输规则：
 - 单个 set/get：metadata 描述 key、ttl、version，payload 传输 value bytes
 - batch set/get：metadata 内保存 payload_offset/payload_size，payload 拼接多个 value bytes
 - response 使用 flags 区分正常响应和协议错误
-- route_epoch 用于让 SDK/DataNode 检测客户端路由是否过旧
+- route_epoch 用于让 SDK/DataNode 检测客户端路由是否过旧；MVP 中 DataNode 对非 0 且小于本节点已观测 control revision 的请求返回 `ErrorNoRoute`
 
 ### 8.2 SDK 使用示例
 

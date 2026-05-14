@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lyonbrown4d/nespa/cache"
@@ -23,6 +24,7 @@ type ServiceRuntime struct {
 	cfg               Config
 	controlClient     *ControlClient
 	heartbeatInterval time.Duration
+	routeEpoch        atomic.Uint64
 }
 
 func NewServiceRuntime(cfg Config, _ cache.Service) *ServiceRuntime {
@@ -41,25 +43,39 @@ func StartControlRegistration(ctx context.Context, logger *slog.Logger, svc *Ser
 	if strings.TrimSpace(svc.cfg.ControlAddr) == "" {
 		return nil
 	}
-	registerWithControl(ctx, logger, svc.controlClient, svc.cfg)
-	go runControlHeartbeat(ctx, logger, svc.controlClient, svc.cfg, svc.heartbeatInterval)
+	registerWithControl(ctx, logger, svc)
+	go runControlHeartbeat(ctx, logger, svc)
 	return nil
 }
 
-func registerWithControl(ctx context.Context, logger *slog.Logger, client *ControlClient, cfg Config) {
-	resp, err := client.RegisterNode(ctx, controlapi.RegisterNodeBody{
-		NodeID: cfg.NodeID,
-		Addr:   cfg.Addr,
-	})
-	if err != nil {
-		logger.Warn("node control-plane registration failed", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "error", err)
-		return
-	}
-	logger.Info("node registered with control-plane", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "revision", resp.Revision)
+func (s *ServiceRuntime) RouteEpoch() uint64 {
+	return s.routeEpoch.Load()
 }
 
-func runControlHeartbeat(ctx context.Context, logger *slog.Logger, client *ControlClient, cfg Config, interval time.Duration) {
-	ticker := time.NewTicker(interval)
+func (s *ServiceRuntime) observeRevision(revision uint64) {
+	for {
+		current := s.routeEpoch.Load()
+		if revision <= current || s.routeEpoch.CompareAndSwap(current, revision) {
+			return
+		}
+	}
+}
+
+func registerWithControl(ctx context.Context, logger *slog.Logger, svc *ServiceRuntime) {
+	resp, err := svc.controlClient.RegisterNode(ctx, controlapi.RegisterNodeBody{
+		NodeID: svc.cfg.NodeID,
+		Addr:   svc.cfg.Addr,
+	})
+	if err != nil {
+		logger.Warn("node control-plane registration failed", "node_id", svc.cfg.NodeID, "control_addr", svc.cfg.ControlAddr, "error", err)
+		return
+	}
+	svc.observeRevision(resp.Revision)
+	logger.Info("node registered with control-plane", "node_id", svc.cfg.NodeID, "control_addr", svc.cfg.ControlAddr, "revision", resp.Revision)
+}
+
+func runControlHeartbeat(ctx context.Context, logger *slog.Logger, svc *ServiceRuntime) {
+	ticker := time.NewTicker(svc.heartbeatInterval)
 	defer ticker.Stop()
 
 	for {
@@ -67,15 +83,16 @@ func runControlHeartbeat(ctx context.Context, logger *slog.Logger, client *Contr
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			resp, err := client.Heartbeat(ctx, controlapi.HeartbeatBody{
-				NodeID: cfg.NodeID,
-				Addr:   cfg.Addr,
+			resp, err := svc.controlClient.Heartbeat(ctx, controlapi.HeartbeatBody{
+				NodeID: svc.cfg.NodeID,
+				Addr:   svc.cfg.Addr,
 			})
 			if err != nil {
-				logger.Warn("node control-plane heartbeat failed", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "error", err)
+				logger.Warn("node control-plane heartbeat failed", "node_id", svc.cfg.NodeID, "control_addr", svc.cfg.ControlAddr, "error", err)
 				continue
 			}
-			logger.Debug("node control-plane heartbeat sent", "node_id", cfg.NodeID, "control_addr", cfg.ControlAddr, "revision", resp.Revision)
+			svc.observeRevision(resp.Revision)
+			logger.Debug("node control-plane heartbeat sent", "node_id", svc.cfg.NodeID, "control_addr", svc.cfg.ControlAddr, "revision", resp.Revision)
 		}
 	}
 }

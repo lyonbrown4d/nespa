@@ -119,8 +119,11 @@ func nodeModule() dix.Module {
 				}))
 			}),
 			dix.Provider2(node.NewServiceRuntime),
-			dix.Provider2(func(cfg node.Config, svc cache.Service) *cachetcp.Server {
-				return cachetcp.NewServer(cachetcp.ServerConfig{Addr: cfg.Addr}, svc)
+			dix.Provider3(func(cfg node.Config, svc cache.Service, nodeSvc *node.ServiceRuntime) *cachetcp.Server {
+				return cachetcp.NewServer(cachetcp.ServerConfig{
+					Addr:              cfg.Addr,
+					CurrentRouteEpoch: nodeSvc.RouteEpoch,
+				}, svc)
 			}),
 		),
 		dix.WithModuleImports(
