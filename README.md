@@ -120,12 +120,11 @@ metadata     []byte
 payload      []byte
 ```
 
-`metadata` carries `cachewire` metadata and protocol errors, while `payload`
-carries raw cache value bytes. Single-key cache ops use the `cachewire` binary
-metadata codec; batch set/get still uses metadata payload offsets so values do
-not need to be JSON encoded. DataNodes reject non-zero `route_epoch` values older
-than the node's latest observed control revision. The frame codec lives in
-`protocol`.
+`metadata` carries `cachewire` binary metadata for cache ops, while `payload`
+carries raw cache value bytes. Protocol error frames still carry `cachewire.Error`
+JSON. Batch set/get metadata stores payload offsets so values do not need to be
+JSON encoded. DataNodes reject non-zero `route_epoch` values older than the
+node's latest observed control revision. The frame codec lives in `protocol`.
 
 The public TCP client SDK lives in `client` and uses `transport/tcp` underneath.
 Use `client.NewTCP` for a direct single-node TCP client, or `client.NewRoutedTCP`

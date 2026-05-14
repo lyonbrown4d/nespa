@@ -981,7 +981,7 @@ per-shard raft data replication
 
 ### 8.1 基础 KV API
 
-数据面使用 Nespa TCP frame。Frame header 固定宽度；单 key cache op 的 metadata 使用 `cachewire` binary codec；batch metadata 在过渡期继续保存 payload offset/size；payload 保存原始 value bytes。
+数据面使用 Nespa TCP frame。Frame header 固定宽度；cache op metadata 使用 `cachewire` binary codec；payload 保存原始 value bytes。
 
 ```text
 magic        uint32  "NSPA"
@@ -1022,8 +1022,8 @@ CacheBatchSet
 Value 传输规则：
 
 - 单 key op：metadata 使用 binary codec 描述 key、ttl、version、found/deleted/touched 等字段，payload 传输 value bytes
-- batch set/get：metadata 内保存 payload_offset/payload_size，payload 拼接多个 value bytes
-- response 使用 flags 区分正常响应和协议错误
+- batch set/get：metadata 使用 binary codec 保存 payload_offset/payload_size，payload 拼接多个 value bytes
+- response 使用 flags 区分正常响应和协议错误；协议错误 frame 在 MVP 阶段仍使用 `cachewire.Error` JSON metadata
 - route_epoch 用于让 SDK/DataNode 检测客户端路由是否过旧；MVP 中 DataNode 对非 0 且小于本节点已观测 control revision 的请求返回 `ErrorNoRoute`
 
 ### 8.2 SDK 使用示例

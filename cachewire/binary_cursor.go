@@ -40,6 +40,10 @@ func appendUint64(raw []byte, value uint64) []byte {
 	return binary.BigEndian.AppendUint64(raw, value)
 }
 
+func appendUint32(raw []byte, value uint32) []byte {
+	return binary.BigEndian.AppendUint32(raw, value)
+}
+
 func appendInt64(raw []byte, value int64) []byte {
 	return binary.AppendVarint(raw, value)
 }
@@ -170,6 +174,16 @@ func (c *metadataCursor) readUint64() (uint64, error) {
 	return value, nil
 }
 
+func (c *metadataCursor) readUint32() (uint32, error) {
+	end := c.pos + 4
+	if end < c.pos || end > len(c.raw) {
+		return 0, invalidMetadata("missing uint32")
+	}
+	value := binary.BigEndian.Uint32(c.raw[c.pos:end])
+	c.pos = end
+	return value, nil
+}
+
 func (c *metadataCursor) readInt64() (int64, error) {
 	value, count := binary.Varint(c.raw[c.pos:])
 	if count <= 0 {
@@ -177,6 +191,14 @@ func (c *metadataCursor) readInt64() (int64, error) {
 	}
 	c.pos += count
 	return value, nil
+}
+
+func (c *metadataCursor) readCount() (int, error) {
+	count, err := c.readUint64()
+	if err != nil {
+		return 0, err
+	}
+	return checkedStringLength(count, len(c.raw)-c.pos)
 }
 
 func (c *metadataCursor) ensureEOF() error {

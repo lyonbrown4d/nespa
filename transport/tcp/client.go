@@ -89,44 +89,32 @@ func (c *Client) Touch(ctx context.Context, addr string, request cachewire.Touch
 }
 
 func (c *Client) BatchSet(ctx context.Context, addr string, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
-	metadata, payload, err := cachewire.PackBatchSet(request)
+	metadata, payload, err := cachewire.EncodeBatchSetRequest(request)
 	if err != nil {
-		return cachewire.BatchSetResponse{}, fmt.Errorf("pack cache batch set request: %w", err)
+		return cachewire.BatchSetResponse{}, fmt.Errorf("encode cache batch set request: %w", err)
 	}
-	frame, err := c.doJSON(ctx, addr, protocol.OpCacheBatchSet, metadata, payload)
+	frame, err := c.do(ctx, addr, protocol.OpCacheBatchSet, request.RouteEpoch, metadata, payload)
 	if err != nil {
 		return cachewire.BatchSetResponse{}, err
 	}
-	var out cachewire.BatchSetResponse
-	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+	out, decodeErr := cachewire.DecodeBatchSetResponse(frame.Metadata)
+	if decodeErr != nil {
 		return out, fmt.Errorf("decode cache batch set response: %w", decodeErr)
 	}
 	return out, nil
 }
 
 func (c *Client) BatchGet(ctx context.Context, addr string, request cachewire.BatchGetRequest) (cachewire.BatchGetResponse, error) {
-	frame, err := c.doJSON(ctx, addr, protocol.OpCacheBatchGet, request, nil)
+	metadata := cachewire.EncodeBatchGetRequest(request)
+	frame, err := c.do(ctx, addr, protocol.OpCacheBatchGet, request.RouteEpoch, metadata, nil)
 	if err != nil {
 		return cachewire.BatchGetResponse{}, err
 	}
-	var out cachewire.BatchGetResponse
-	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+	out, decodeErr := cachewire.DecodeBatchGetResponse(frame.Metadata, frame.Payload)
+	if decodeErr != nil {
 		return out, fmt.Errorf("decode cache batch get response: %w", decodeErr)
 	}
-	records, err := cachewire.UnpackRecords(out, frame.Payload)
-	if err != nil {
-		return out, fmt.Errorf("unpack cache batch get response: %w", err)
-	}
-	out.Records = records
 	return out, nil
-}
-
-func (c *Client) doJSON(ctx context.Context, addr string, op protocol.Op, metadata any, payload []byte) (protocol.Frame, error) {
-	raw, err := json.Marshal(metadata)
-	if err != nil {
-		return protocol.Frame{}, fmt.Errorf("encode cache frame metadata: %w", err)
-	}
-	return c.do(ctx, addr, op, routeEpoch(metadata), raw, payload)
 }
 
 func (c *Client) do(ctx context.Context, addr string, op protocol.Op, routeEpoch uint64, metadata, payload []byte) (protocol.Frame, error) {
@@ -158,27 +146,6 @@ func (c *Client) do(ctx context.Context, addr string, op protocol.Op, routeEpoch
 		return protocol.Frame{}, decodeError(frame)
 	}
 	return frame, nil
-}
-
-func routeEpoch(metadata any) uint64 {
-	switch item := metadata.(type) {
-	case cachewire.SetRequest:
-		return item.RouteEpoch
-	case cachewire.GetRequest:
-		return item.RouteEpoch
-	case cachewire.DeleteRequest:
-		return item.RouteEpoch
-	case cachewire.ExistsRequest:
-		return item.RouteEpoch
-	case cachewire.TouchRequest:
-		return item.RouteEpoch
-	case cachewire.BatchSetRequest:
-		return item.RouteEpoch
-	case cachewire.BatchGetRequest:
-		return item.RouteEpoch
-	default:
-		return 0
-	}
 }
 
 func (c *Client) dial(ctx context.Context, addr string) (io.ReadWriteCloser, error) {

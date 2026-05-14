@@ -12,14 +12,6 @@ import (
 	"github.com/lyonbrown4d/nespa/protocol"
 )
 
-func jsonFrame(request protocol.Frame, metadata any, payload []byte) protocol.Frame {
-	raw, err := json.Marshal(metadata)
-	if err != nil {
-		return errorFrame(request, protocol.ErrorInternal, err)
-	}
-	return metadataFrame(request, raw, payload)
-}
-
 func metadataFrame(request protocol.Frame, metadata, payload []byte) protocol.Frame {
 	return protocol.Frame{
 		Flags:      protocol.FlagResponse,
