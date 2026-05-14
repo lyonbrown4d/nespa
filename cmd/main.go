@@ -134,8 +134,7 @@ type heartbeatConfig struct {
 }
 
 type frontendConfig struct {
-	Addr string         `mapstructure:"addr"`
-	Node endpointConfig `mapstructure:"node"`
+	Addr string `mapstructure:"addr"`
 }
 
 type serverConfig struct {

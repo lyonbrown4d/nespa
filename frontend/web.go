@@ -91,7 +91,6 @@ func (s *WebServer) indexView() fiber.Map {
 	return fiber.Map{
 		"Title":       "Nespa",
 		"ControlAddr": s.svc.cfg.ControlAddr,
-		"NodeAddr":    s.svc.cfg.NodeAddr,
 		"RouteEpoch":  snapshot.RouteEpoch,
 		"RouteSource": snapshot.Source,
 		"Routes":      snapshot.Routes,

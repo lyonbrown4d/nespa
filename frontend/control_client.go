@@ -1,4 +1,4 @@
-// Package frontend implements the Nespa request gateway.
+// Package frontend implements the Nespa WebUI and route/debug views.
 package frontend
 
 import (

@@ -19,7 +19,6 @@ func addServerFlags(flags *pflag.FlagSet) {
 	flags.Duration("control-liveness-suspect-after", 15*time.Second, "mark data nodes suspect after this heartbeat age")
 	flags.Duration("control-liveness-dead-after", 30*time.Second, "mark data nodes dead after this heartbeat age")
 	flags.String("frontend-addr", "127.0.0.1:7402", "frontend HTTP listen address")
-	flags.String("frontend-node-addr", "", "data-node TCP address used by the frontend gateway; defaults to --node-addr")
 	flags.String("node-addr", "127.0.0.1:7403", "data-node TCP listen address")
 	flags.String("node-id", "node-1", "data-node identifier")
 	flags.Duration("node-heartbeat-interval", 5*time.Second, "data-node control-plane heartbeat interval")
@@ -83,14 +82,9 @@ func controlConfigFrom(cfg serverConfig) control.Config {
 }
 
 func frontendConfigFrom(cfg serverConfig) frontend.Config {
-	nodeAddr := cfg.Frontend.Node.Addr
-	if nodeAddr == "" {
-		nodeAddr = cfg.Node.Addr
-	}
 	return frontend.Config{
 		Addr:        cfg.Frontend.Addr,
 		ControlAddr: cfg.Control.Addr,
-		NodeAddr:    nodeAddr,
 	}
 }
 

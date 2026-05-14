@@ -100,6 +100,7 @@ console APIs.
 SDK hot-path cache operations use direct-route mode: the SDK reads the control
 snapshot over HTTP, caches catalog versions and vslot routes locally, then sends
 cache frames directly to the selected DataNode TCP address.
+The frontend does not proxy cache reads or writes.
 
 Current hot-path ops are `CacheGet`, `CacheSet`, `CacheDelete`, `CacheExists`,
 `CacheTouch`, `CacheBatchGet`, and `CacheBatchSet`.

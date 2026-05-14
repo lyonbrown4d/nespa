@@ -4,14 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"time"
-
-	"github.com/lyonbrown4d/nespa/controlapi"
 )
 
 type Config struct {
 	Addr        string
 	ControlAddr string
-	NodeAddr    string
 }
 
 type ServiceRuntime struct {
@@ -21,20 +18,9 @@ type ServiceRuntime struct {
 }
 
 func NewServiceRuntime(cfg Config) *ServiceRuntime {
-	initialRoutes := []Route{}
-	if hasAddress(cfg.NodeAddr) {
-		initialRoutes = append(initialRoutes, Route{
-			Role:       "data-node",
-			Addr:       cfg.NodeAddr,
-			VSlotStart: 0,
-			VSlotEnd:   controlapi.VSlotMax,
-			Weight:     1,
-		})
-	}
-
 	return &ServiceRuntime{
 		cfg:           cfg,
-		routeCache:    NewRouteCache("bootstrap", initialRoutes),
+		routeCache:    NewRouteCache(cfg.ControlAddr, nil),
 		controlClient: NewControlClient(cfg.ControlAddr),
 	}
 }

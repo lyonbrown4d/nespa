@@ -256,6 +256,8 @@ nespa node
 nespa admin
 ```
 
+Frontend 只展示控制面、路由与调试视图，不承载 cache HTTP gateway；cache 读写热路径由 SDK 读取 control snapshot 后直接走 DataNode TCP binary protocol。
+
 ---
 
 ## 5. 技术选型
@@ -1850,7 +1852,7 @@ nespa/
       auth/
       routing/
       querycoord/
-      gateway/
+      views/
 
     node/
       engine/

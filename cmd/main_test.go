@@ -18,7 +18,6 @@ func TestLoadServerConfigFromFlags(t *testing.T) {
 		"--control-liveness-suspect-after", "2s",
 		"--control-liveness-dead-after", "3s",
 		"--frontend-addr", "127.0.0.1:9002",
-		"--frontend-node-addr", "127.0.0.1:9103",
 		"--node-addr", "127.0.0.1:9003",
 		"--node-id", "node-a",
 		"--node-heartbeat-interval", "4s",
@@ -41,7 +40,7 @@ func TestLoadServerConfigFromFlags(t *testing.T) {
 	assertConfigValues(t, cfg)
 }
 
-func TestFrontendConfigFallsBackToNodeAddress(t *testing.T) {
+func TestFrontendConfigUsesControlSnapshotOnly(t *testing.T) {
 	cfg := serverConfig{
 		Control: controlConfig{Addr: "127.0.0.1:7401"},
 		Frontend: frontendConfig{
@@ -51,8 +50,8 @@ func TestFrontendConfigFallsBackToNodeAddress(t *testing.T) {
 	}
 
 	frontendCfg := frontendConfigFrom(cfg)
-	if frontendCfg.NodeAddr != "127.0.0.1:7403" {
-		t.Fatalf("frontend node addr = %s, want node addr fallback", frontendCfg.NodeAddr)
+	if frontendCfg.Addr != "127.0.0.1:7402" || frontendCfg.ControlAddr != "127.0.0.1:7401" {
+		t.Fatalf("frontend config = %+v", frontendCfg)
 	}
 }
 
@@ -69,7 +68,6 @@ func assertConfigValues(t *testing.T, cfg serverConfig) {
 		{name: "liveness suspect", got: cfg.Control.Liveness.Suspect.After, want: 2 * time.Second},
 		{name: "liveness dead", got: cfg.Control.Liveness.Dead.After, want: 3 * time.Second},
 		{name: "frontend addr", got: cfg.Frontend.Addr, want: "127.0.0.1:9002"},
-		{name: "frontend node addr", got: cfg.Frontend.Node.Addr, want: "127.0.0.1:9103"},
 		{name: "node addr", got: cfg.Node.Addr, want: "127.0.0.1:9003"},
 		{name: "node id", got: cfg.Node.ID, want: "node-a"},
 		{name: "heartbeat interval", got: cfg.Node.Heartbeat.Interval, want: 4 * time.Second},
