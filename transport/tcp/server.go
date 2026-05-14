@@ -164,8 +164,8 @@ func (s *Server) staleRoute(routeEpoch uint64) (bool, uint64) {
 }
 
 func (s *Server) handleSet(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	var request cachewire.SetRequest
-	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+	request, err := cachewire.DecodeSetRequest(frame.Metadata)
+	if err != nil {
 		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
 	value := frame.Payload
@@ -181,8 +181,8 @@ func (s *Server) handleSet(ctx context.Context, frame protocol.Frame) protocol.F
 }
 
 func (s *Server) handleGet(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	var request cachewire.GetRequest
-	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+	request, err := cachewire.DecodeGetRequest(frame.Metadata)
+	if err != nil {
 		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
 	rec, found, err := s.service.Get(ctx, keyFromWire(request.Key), cache.GetOptions{
@@ -196,39 +196,39 @@ func (s *Server) handleGet(ctx context.Context, frame protocol.Frame) protocol.F
 }
 
 func (s *Server) handleDelete(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	var request cachewire.DeleteRequest
-	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+	request, err := cachewire.DecodeDeleteRequest(frame.Metadata)
+	if err != nil {
 		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
 	deleted, err := s.service.Delete(ctx, keyFromWire(request.Key))
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
-	return jsonFrame(frame, cachewire.DeleteResponse{Deleted: deleted}, nil)
+	return metadataFrame(frame, cachewire.EncodeDeleteResponse(cachewire.DeleteResponse{Deleted: deleted}), nil)
 }
 
 func (s *Server) handleExists(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	var request cachewire.ExistsRequest
-	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+	request, err := cachewire.DecodeExistsRequest(frame.Metadata)
+	if err != nil {
 		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
 	exists, err := s.service.Exists(ctx, keyFromWire(request.Key), getOptionsFromExists(request))
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
-	return jsonFrame(frame, cachewire.ExistsResponse{Exists: exists}, nil)
+	return metadataFrame(frame, cachewire.EncodeExistsResponse(cachewire.ExistsResponse{Exists: exists}), nil)
 }
 
 func (s *Server) handleTouch(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	var request cachewire.TouchRequest
-	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+	request, err := cachewire.DecodeTouchRequest(frame.Metadata)
+	if err != nil {
 		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
 	touched, err := s.service.Touch(ctx, keyFromWire(request.Key), touchOptionsFromWire(request))
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
-	return jsonFrame(frame, cachewire.TouchResponse{Touched: touched}, nil)
+	return metadataFrame(frame, cachewire.EncodeTouchResponse(cachewire.TouchResponse{Touched: touched}), nil)
 }
 
 func (s *Server) handleBatchSet(ctx context.Context, frame protocol.Frame) protocol.Frame {
@@ -265,8 +265,8 @@ func (s *Server) handleBatchGet(ctx context.Context, frame protocol.Frame) proto
 
 func recordFrame(frame protocol.Frame, rec cache.Record, found bool) protocol.Frame {
 	if !found {
-		return jsonFrame(frame, cachewire.Record{Found: false}, nil)
+		return metadataFrame(frame, cachewire.EncodeRecord(cachewire.Record{Found: false}), nil)
 	}
 	body := recordFromCache(rec, true)
-	return jsonFrame(frame, body, rec.Value)
+	return metadataFrame(frame, cachewire.EncodeRecord(body), rec.Value)
 }

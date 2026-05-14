@@ -17,12 +17,16 @@ func jsonFrame(request protocol.Frame, metadata any, payload []byte) protocol.Fr
 	if err != nil {
 		return errorFrame(request, protocol.ErrorInternal, err)
 	}
+	return metadataFrame(request, raw, payload)
+}
+
+func metadataFrame(request protocol.Frame, metadata, payload []byte) protocol.Frame {
 	return protocol.Frame{
 		Flags:      protocol.FlagResponse,
 		Op:         request.Op,
 		RequestID:  request.RequestID,
 		RouteEpoch: request.RouteEpoch,
-		Metadata:   raw,
+		Metadata:   metadata,
 		Payload:    payload,
 	}
 }

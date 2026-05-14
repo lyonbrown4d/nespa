@@ -32,8 +32,8 @@ func NewClient() *Client {
 
 func (c *Client) Set(ctx context.Context, addr string, request cachewire.SetRequest) (cachewire.Record, error) {
 	payload := request.Value
-	request.Value = nil
-	frame, err := c.do(ctx, addr, protocol.OpCacheSet, request, payload)
+	metadata := cachewire.EncodeSetRequest(request)
+	frame, err := c.do(ctx, addr, protocol.OpCacheSet, request.RouteEpoch, metadata, payload)
 	if err != nil {
 		return cachewire.Record{}, err
 	}
@@ -41,7 +41,8 @@ func (c *Client) Set(ctx context.Context, addr string, request cachewire.SetRequ
 }
 
 func (c *Client) Get(ctx context.Context, addr string, request cachewire.GetRequest) (cachewire.Record, error) {
-	frame, err := c.do(ctx, addr, protocol.OpCacheGet, request, nil)
+	metadata := cachewire.EncodeGetRequest(request)
+	frame, err := c.do(ctx, addr, protocol.OpCacheGet, request.RouteEpoch, metadata, nil)
 	if err != nil {
 		return cachewire.Record{}, err
 	}
@@ -49,36 +50,39 @@ func (c *Client) Get(ctx context.Context, addr string, request cachewire.GetRequ
 }
 
 func (c *Client) Delete(ctx context.Context, addr string, request cachewire.DeleteRequest) (cachewire.DeleteResponse, error) {
-	frame, err := c.do(ctx, addr, protocol.OpCacheDelete, request, nil)
+	metadata := cachewire.EncodeDeleteRequest(request)
+	frame, err := c.do(ctx, addr, protocol.OpCacheDelete, request.RouteEpoch, metadata, nil)
 	if err != nil {
 		return cachewire.DeleteResponse{}, err
 	}
-	var out cachewire.DeleteResponse
-	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+	out, decodeErr := cachewire.DecodeDeleteResponse(frame.Metadata)
+	if decodeErr != nil {
 		return out, fmt.Errorf("decode cache delete response: %w", decodeErr)
 	}
 	return out, nil
 }
 
 func (c *Client) Exists(ctx context.Context, addr string, request cachewire.ExistsRequest) (cachewire.ExistsResponse, error) {
-	frame, err := c.do(ctx, addr, protocol.OpCacheExists, request, nil)
+	metadata := cachewire.EncodeExistsRequest(request)
+	frame, err := c.do(ctx, addr, protocol.OpCacheExists, request.RouteEpoch, metadata, nil)
 	if err != nil {
 		return cachewire.ExistsResponse{}, err
 	}
-	var out cachewire.ExistsResponse
-	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+	out, decodeErr := cachewire.DecodeExistsResponse(frame.Metadata)
+	if decodeErr != nil {
 		return out, fmt.Errorf("decode cache exists response: %w", decodeErr)
 	}
 	return out, nil
 }
 
 func (c *Client) Touch(ctx context.Context, addr string, request cachewire.TouchRequest) (cachewire.TouchResponse, error) {
-	frame, err := c.do(ctx, addr, protocol.OpCacheTouch, request, nil)
+	metadata := cachewire.EncodeTouchRequest(request)
+	frame, err := c.do(ctx, addr, protocol.OpCacheTouch, request.RouteEpoch, metadata, nil)
 	if err != nil {
 		return cachewire.TouchResponse{}, err
 	}
-	var out cachewire.TouchResponse
-	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+	out, decodeErr := cachewire.DecodeTouchResponse(frame.Metadata)
+	if decodeErr != nil {
 		return out, fmt.Errorf("decode cache touch response: %w", decodeErr)
 	}
 	return out, nil
@@ -89,7 +93,7 @@ func (c *Client) BatchSet(ctx context.Context, addr string, request cachewire.Ba
 	if err != nil {
 		return cachewire.BatchSetResponse{}, fmt.Errorf("pack cache batch set request: %w", err)
 	}
-	frame, err := c.do(ctx, addr, protocol.OpCacheBatchSet, metadata, payload)
+	frame, err := c.doJSON(ctx, addr, protocol.OpCacheBatchSet, metadata, payload)
 	if err != nil {
 		return cachewire.BatchSetResponse{}, err
 	}
@@ -101,7 +105,7 @@ func (c *Client) BatchSet(ctx context.Context, addr string, request cachewire.Ba
 }
 
 func (c *Client) BatchGet(ctx context.Context, addr string, request cachewire.BatchGetRequest) (cachewire.BatchGetResponse, error) {
-	frame, err := c.do(ctx, addr, protocol.OpCacheBatchGet, request, nil)
+	frame, err := c.doJSON(ctx, addr, protocol.OpCacheBatchGet, request, nil)
 	if err != nil {
 		return cachewire.BatchGetResponse{}, err
 	}
@@ -117,24 +121,27 @@ func (c *Client) BatchGet(ctx context.Context, addr string, request cachewire.Ba
 	return out, nil
 }
 
-func (c *Client) do(ctx context.Context, addr string, op protocol.Op, metadata any, payload []byte) (protocol.Frame, error) {
+func (c *Client) doJSON(ctx context.Context, addr string, op protocol.Op, metadata any, payload []byte) (protocol.Frame, error) {
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		return protocol.Frame{}, fmt.Errorf("encode cache frame metadata: %w", err)
+	}
+	return c.do(ctx, addr, op, routeEpoch(metadata), raw, payload)
+}
+
+func (c *Client) do(ctx context.Context, addr string, op protocol.Op, routeEpoch uint64, metadata, payload []byte) (protocol.Frame, error) {
 	conn, err := c.dial(ctx, addr)
 	if err != nil {
 		return protocol.Frame{}, err
 	}
 	defer closeConn(conn)
 
-	raw, err := json.Marshal(metadata)
-	if err != nil {
-		return protocol.Frame{}, fmt.Errorf("encode cache frame metadata: %w", err)
-	}
-
 	requestID := c.nextID.Add(1)
 	if encodeErr := c.codec.Encode(conn, protocol.Frame{
 		Op:         op,
 		RequestID:  requestID,
-		RouteEpoch: routeEpoch(metadata),
-		Metadata:   raw,
+		RouteEpoch: routeEpoch,
+		Metadata:   metadata,
 		Payload:    payload,
 	}); encodeErr != nil {
 		return protocol.Frame{}, fmt.Errorf("write cache frame: %w", encodeErr)
@@ -201,8 +208,8 @@ func normalizeAddr(addr string) string {
 }
 
 func decodeRecord(frame protocol.Frame) (cachewire.Record, error) {
-	var out cachewire.Record
-	if err := json.Unmarshal(frame.Metadata, &out); err != nil {
+	out, err := cachewire.DecodeRecord(frame.Metadata)
+	if err != nil {
 		return out, fmt.Errorf("decode cache record response: %w", err)
 	}
 	if len(frame.Payload) > 0 {

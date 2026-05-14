@@ -314,7 +314,7 @@ Nespa TCP Frame
 协议形态：
 
 ```text
-fixed-width binary header + JSON metadata + raw payload
+fixed-width binary header + binary metadata + raw payload
 ```
 
 选择 TCP frame 的原因：
@@ -981,7 +981,7 @@ per-shard raft data replication
 
 ### 8.1 基础 KV API
 
-数据面使用 Nespa TCP frame。Frame header 固定宽度，metadata 使用 JSON DTO，payload 保存原始 value bytes。
+数据面使用 Nespa TCP frame。Frame header 固定宽度；单 key cache op 的 metadata 使用 `cachewire` binary codec；batch metadata 在过渡期继续保存 payload offset/size；payload 保存原始 value bytes。
 
 ```text
 magic        uint32  "NSPA"
@@ -1021,7 +1021,7 @@ CacheBatchSet
 
 Value 传输规则：
 
-- 单个 set/get：metadata 描述 key、ttl、version，payload 传输 value bytes
+- 单 key op：metadata 使用 binary codec 描述 key、ttl、version、found/deleted/touched 等字段，payload 传输 value bytes
 - batch set/get：metadata 内保存 payload_offset/payload_size，payload 拼接多个 value bytes
 - response 使用 flags 区分正常响应和协议错误
 - route_epoch 用于让 SDK/DataNode 检测客户端路由是否过旧；MVP 中 DataNode 对非 0 且小于本节点已观测 control revision 的请求返回 `ErrorNoRoute`
