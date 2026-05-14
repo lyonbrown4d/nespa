@@ -91,6 +91,21 @@ func batchGetRequests(items []cachewire.GetRequest) []cache.GetRequest {
 	return requests
 }
 
+func getOptionsFromExists(request cachewire.ExistsRequest) cache.GetOptions {
+	return cache.GetOptions{
+		NamespaceVersion: request.NamespaceVersion,
+		SpaceVersion:     request.SpaceVersion,
+	}
+}
+
+func touchOptionsFromWire(request cachewire.TouchRequest) cache.TouchOptions {
+	return cache.TouchOptions{
+		TTL:              ttlFromMillis(request.TTLMillis),
+		NamespaceVersion: request.NamespaceVersion,
+		SpaceVersion:     request.SpaceVersion,
+	}
+}
+
 func recordsFromCache(records []cache.Record) []cachewire.Record {
 	out := make([]cachewire.Record, 0, len(records))
 	for index := range records {

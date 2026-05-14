@@ -48,6 +48,8 @@ const (
 	OpNodeHeartbeat
 	OpControlSnapshot
 	OpControlWatch
+	OpCacheExists
+	OpCacheTouch
 )
 
 type Flags uint8

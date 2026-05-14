@@ -41,6 +41,21 @@ type DeleteRequest struct {
 	RouteEpoch uint64 `json:"-"`
 }
 
+type ExistsRequest struct {
+	Key
+	RouteEpoch       uint64 `json:"-"`
+	NamespaceVersion uint64 `json:"namespace_version,omitempty"`
+	SpaceVersion     uint64 `json:"space_version,omitempty"`
+}
+
+type TouchRequest struct {
+	Key
+	RouteEpoch       uint64 `json:"-"`
+	TTLMillis        int64  `json:"ttl_ms"`
+	NamespaceVersion uint64 `json:"namespace_version,omitempty"`
+	SpaceVersion     uint64 `json:"space_version,omitempty"`
+}
+
 type BatchSetRequest struct {
 	RouteEpoch uint64       `json:"-"`
 	Items      []SetRequest `json:"items"`
@@ -68,6 +83,14 @@ type Record struct {
 
 type DeleteResponse struct {
 	Deleted bool `json:"deleted"`
+}
+
+type ExistsResponse struct {
+	Exists bool `json:"exists"`
+}
+
+type TouchResponse struct {
+	Touched bool `json:"touched"`
 }
 
 type BatchSetResponse struct {

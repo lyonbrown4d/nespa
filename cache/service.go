@@ -52,7 +52,9 @@ type GetOptions struct {
 }
 
 type TouchOptions struct {
-	TTL time.Duration
+	TTL              time.Duration
+	NamespaceVersion uint64
+	SpaceVersion     uint64
 }
 
 type Service interface {
@@ -165,7 +167,11 @@ func (s *EngineService) Exists(ctx context.Context, key Key, opts GetOptions) (b
 }
 
 func (s *EngineService) Touch(ctx context.Context, key Key, opts TouchOptions) (bool, error) {
-	touched, err := s.engine.Touch(ctx, key, engine.TouchOptions{TTL: opts.TTL})
+	touched, err := s.engine.Touch(ctx, key, engine.TouchOptions{
+		TTL:              opts.TTL,
+		NamespaceVersion: opts.NamespaceVersion,
+		SpaceVersion:     opts.SpaceVersion,
+	})
 	if err != nil {
 		return false, fmt.Errorf("touch engine record: %w", err)
 	}

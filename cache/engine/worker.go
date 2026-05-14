@@ -127,6 +127,9 @@ func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
 		s.deleteEntry(cmd.physical, ent)
 		return shardResult{}
 	}
+	if !ent.visible(GetOptions{NamespaceVersion: cmd.touch.NamespaceVersion, SpaceVersion: cmd.touch.SpaceVersion}) {
+		return shardResult{}
+	}
 
 	ent.expireAt = cmd.now.Add(cmd.touch.TTL)
 	ent.updatedAt = cmd.now

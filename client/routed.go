@@ -98,6 +98,32 @@ func (c *RoutedTCPClient) Delete(ctx context.Context, request cachewire.DeleteRe
 	return response, nil
 }
 
+func (c *RoutedTCPClient) Exists(ctx context.Context, request cachewire.ExistsRequest) (cachewire.ExistsResponse, error) {
+	decision, err := c.resolve(ctx, request.Key)
+	if err != nil {
+		return cachewire.ExistsResponse{}, err
+	}
+	stampExistsRequest(&request, decision)
+	response, err := c.transport.Exists(ctx, decision.addr, request)
+	if err != nil {
+		return cachewire.ExistsResponse{}, fmt.Errorf("check routed cache record: %w", err)
+	}
+	return response, nil
+}
+
+func (c *RoutedTCPClient) Touch(ctx context.Context, request cachewire.TouchRequest) (cachewire.TouchResponse, error) {
+	decision, err := c.resolve(ctx, request.Key)
+	if err != nil {
+		return cachewire.TouchResponse{}, err
+	}
+	stampTouchRequest(&request, decision)
+	response, err := c.transport.Touch(ctx, decision.addr, request)
+	if err != nil {
+		return cachewire.TouchResponse{}, fmt.Errorf("touch routed cache record: %w", err)
+	}
+	return response, nil
+}
+
 func (c *RoutedTCPClient) resolve(ctx context.Context, key cachewire.Key) (routeDecision, error) {
 	snapshot, err := c.currentSnapshot(ctx)
 	if err != nil {
@@ -152,6 +178,18 @@ func stampSetRequest(request *cachewire.SetRequest, decision routeDecision) {
 }
 
 func stampGetRequest(request *cachewire.GetRequest, decision routeDecision) {
+	request.RouteEpoch = decision.routeEpoch
+	request.NamespaceVersion = decision.namespaceVersion
+	request.SpaceVersion = decision.spaceVersion
+}
+
+func stampExistsRequest(request *cachewire.ExistsRequest, decision routeDecision) {
+	request.RouteEpoch = decision.routeEpoch
+	request.NamespaceVersion = decision.namespaceVersion
+	request.SpaceVersion = decision.spaceVersion
+}
+
+func stampTouchRequest(request *cachewire.TouchRequest, decision routeDecision) {
 	request.RouteEpoch = decision.routeEpoch
 	request.NamespaceVersion = decision.namespaceVersion
 	request.SpaceVersion = decision.spaceVersion

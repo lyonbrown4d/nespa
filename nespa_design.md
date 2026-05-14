@@ -1000,6 +1000,8 @@ MVP ops：
 CacheGet
 CacheSet
 CacheDelete
+CacheExists
+CacheTouch
 CacheBatchGet
 CacheBatchSet
 ```

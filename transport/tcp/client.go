@@ -60,6 +60,30 @@ func (c *Client) Delete(ctx context.Context, addr string, request cachewire.Dele
 	return out, nil
 }
 
+func (c *Client) Exists(ctx context.Context, addr string, request cachewire.ExistsRequest) (cachewire.ExistsResponse, error) {
+	frame, err := c.do(ctx, addr, protocol.OpCacheExists, request, nil)
+	if err != nil {
+		return cachewire.ExistsResponse{}, err
+	}
+	var out cachewire.ExistsResponse
+	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+		return out, fmt.Errorf("decode cache exists response: %w", decodeErr)
+	}
+	return out, nil
+}
+
+func (c *Client) Touch(ctx context.Context, addr string, request cachewire.TouchRequest) (cachewire.TouchResponse, error) {
+	frame, err := c.do(ctx, addr, protocol.OpCacheTouch, request, nil)
+	if err != nil {
+		return cachewire.TouchResponse{}, err
+	}
+	var out cachewire.TouchResponse
+	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+		return out, fmt.Errorf("decode cache touch response: %w", decodeErr)
+	}
+	return out, nil
+}
+
 func (c *Client) BatchSet(ctx context.Context, addr string, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
 	metadata, payload, err := cachewire.PackBatchSet(request)
 	if err != nil {
@@ -136,6 +160,10 @@ func routeEpoch(metadata any) uint64 {
 	case cachewire.GetRequest:
 		return item.RouteEpoch
 	case cachewire.DeleteRequest:
+		return item.RouteEpoch
+	case cachewire.ExistsRequest:
+		return item.RouteEpoch
+	case cachewire.TouchRequest:
 		return item.RouteEpoch
 	case cachewire.BatchSetRequest:
 		return item.RouteEpoch

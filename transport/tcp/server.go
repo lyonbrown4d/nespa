@@ -130,6 +130,10 @@ func (s *Server) handleFrame(ctx context.Context, frame protocol.Frame) protocol
 		return s.handleGet(ctx, frame)
 	case protocol.OpCacheDelete:
 		return s.handleDelete(ctx, frame)
+	case protocol.OpCacheExists:
+		return s.handleExists(ctx, frame)
+	case protocol.OpCacheTouch:
+		return s.handleTouch(ctx, frame)
 	case protocol.OpCacheBatchSet:
 		return s.handleBatchSet(ctx, frame)
 	case protocol.OpCacheBatchGet:
@@ -183,6 +187,30 @@ func (s *Server) handleDelete(ctx context.Context, frame protocol.Frame) protoco
 		return cacheErrorFrame(frame, err)
 	}
 	return jsonFrame(frame, cachewire.DeleteResponse{Deleted: deleted}, nil)
+}
+
+func (s *Server) handleExists(ctx context.Context, frame protocol.Frame) protocol.Frame {
+	var request cachewire.ExistsRequest
+	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
+	}
+	exists, err := s.service.Exists(ctx, keyFromWire(request.Key), getOptionsFromExists(request))
+	if err != nil {
+		return cacheErrorFrame(frame, err)
+	}
+	return jsonFrame(frame, cachewire.ExistsResponse{Exists: exists}, nil)
+}
+
+func (s *Server) handleTouch(ctx context.Context, frame protocol.Frame) protocol.Frame {
+	var request cachewire.TouchRequest
+	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
+	}
+	touched, err := s.service.Touch(ctx, keyFromWire(request.Key), touchOptionsFromWire(request))
+	if err != nil {
+		return cacheErrorFrame(frame, err)
+	}
+	return jsonFrame(frame, cachewire.TouchResponse{Touched: touched}, nil)
 }
 
 func (s *Server) handleBatchSet(ctx context.Context, frame protocol.Frame) protocol.Frame {

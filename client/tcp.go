@@ -57,6 +57,22 @@ func (c *TCPClient) Delete(ctx context.Context, request cachewire.DeleteRequest)
 	return response, nil
 }
 
+func (c *TCPClient) Exists(ctx context.Context, request cachewire.ExistsRequest) (cachewire.ExistsResponse, error) {
+	response, err := c.transport.Exists(ctx, c.addr, request)
+	if err != nil {
+		return cachewire.ExistsResponse{}, fmt.Errorf("check cache record: %w", err)
+	}
+	return response, nil
+}
+
+func (c *TCPClient) Touch(ctx context.Context, request cachewire.TouchRequest) (cachewire.TouchResponse, error) {
+	response, err := c.transport.Touch(ctx, c.addr, request)
+	if err != nil {
+		return cachewire.TouchResponse{}, fmt.Errorf("touch cache record: %w", err)
+	}
+	return response, nil
+}
+
 func (c *TCPClient) BatchSet(ctx context.Context, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
 	response, err := c.transport.BatchSet(ctx, c.addr, request)
 	if err != nil {

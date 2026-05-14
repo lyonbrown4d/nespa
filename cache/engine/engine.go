@@ -41,7 +41,9 @@ type GetOptions struct {
 }
 
 type TouchOptions struct {
-	TTL time.Duration
+	TTL              time.Duration
+	NamespaceVersion uint64
+	SpaceVersion     uint64
 }
 
 type EvictOptions struct {

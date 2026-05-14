@@ -42,6 +42,7 @@ func TestRoutedTCPClientUsesControlSnapshotVersions(t *testing.T) {
 		t.Fatalf("set v1: %v", setErr)
 	}
 	requireValue(t, routed, key, "v1", 1, 1)
+	requireExists(t, routed, key, true)
 
 	control.Set(snapshotFor(data.Addr(), 2, 2))
 	if refreshErr := routed.Refresh(ctx); refreshErr != nil {
@@ -54,11 +55,14 @@ func TestRoutedTCPClientUsesControlSnapshotVersions(t *testing.T) {
 	if miss.Found {
 		t.Fatalf("record found after version bump: %+v", miss)
 	}
+	requireExists(t, routed, key, false)
+	requireTouched(t, routed, key, false)
 
 	if _, err := routed.Set(ctx, cachewire.SetRequest{Key: key, Value: []byte("v2")}); err != nil {
 		t.Fatalf("set v2: %v", err)
 	}
 	requireValue(t, routed, key, "v2", 2, 2)
+	requireTouched(t, routed, key, true)
 }
 
 func TestRoutedTCPClientReportsMissingRoute(t *testing.T) {
@@ -134,6 +138,28 @@ func requireValue(t *testing.T, routed *client.RoutedTCPClient, key cachewire.Ke
 	}
 	if record.NamespaceVersion != namespaceVersion || record.SpaceVersion != spaceVersion {
 		t.Fatalf("record versions = %d/%d, want %d/%d", record.NamespaceVersion, record.SpaceVersion, namespaceVersion, spaceVersion)
+	}
+}
+
+func requireExists(t *testing.T, routed *client.RoutedTCPClient, key cachewire.Key, want bool) {
+	t.Helper()
+	response, err := routed.Exists(context.Background(), cachewire.ExistsRequest{Key: key})
+	if err != nil {
+		t.Fatalf("exists: %v", err)
+	}
+	if response.Exists != want {
+		t.Fatalf("exists = %v, want %v", response.Exists, want)
+	}
+}
+
+func requireTouched(t *testing.T, routed *client.RoutedTCPClient, key cachewire.Key, want bool) {
+	t.Helper()
+	response, err := routed.Touch(context.Background(), cachewire.TouchRequest{Key: key, TTLMillis: 1000})
+	if err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	if response.Touched != want {
+		t.Fatalf("touched = %v, want %v", response.Touched, want)
 	}
 }
 

@@ -101,6 +101,9 @@ SDK hot-path cache operations use direct-route mode: the SDK reads the control
 snapshot over HTTP, caches catalog versions and vslot routes locally, then sends
 cache frames directly to the selected DataNode TCP address.
 
+Current hot-path ops are `CacheGet`, `CacheSet`, `CacheDelete`, `CacheExists`,
+`CacheTouch`, `CacheBatchGet`, and `CacheBatchSet`.
+
 The current frame header is fixed-width and big-endian:
 
 ```text

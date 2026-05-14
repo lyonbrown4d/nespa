@@ -53,6 +53,102 @@ func TestClientServerSetGetDelete(t *testing.T) {
 	}
 }
 
+func TestClientServerExistsHonorsVersions(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	key := cachewire.Key{Namespace: "ns", Space: "sp", Key: "k"}
+	if _, err := client.Set(ctx, server.Addr(), cachewire.SetRequest{
+		Key:              key,
+		Value:            []byte("v"),
+		NamespaceVersion: 1,
+		SpaceVersion:     1,
+	}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	exists, err := client.Exists(ctx, server.Addr(), cachewire.ExistsRequest{
+		Key:              key,
+		NamespaceVersion: 1,
+		SpaceVersion:     1,
+	})
+	if err != nil {
+		t.Fatalf("exists matching version: %v", err)
+	}
+	if !exists.Exists {
+		t.Fatalf("exists matching version = %+v, want true", exists)
+	}
+
+	exists, err = client.Exists(ctx, server.Addr(), cachewire.ExistsRequest{
+		Key:              key,
+		NamespaceVersion: 2,
+		SpaceVersion:     1,
+	})
+	if err != nil {
+		t.Fatalf("exists mismatched version: %v", err)
+	}
+	if exists.Exists {
+		t.Fatalf("exists mismatched version = %+v, want false", exists)
+	}
+}
+
+func TestClientServerTouchHonorsVersions(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	key := cachewire.Key{Namespace: "ns", Space: "sp", Key: "k"}
+	if _, err := client.Set(ctx, server.Addr(), cachewire.SetRequest{
+		Key:              key,
+		Value:            []byte("v"),
+		NamespaceVersion: 1,
+		SpaceVersion:     1,
+	}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	touched, err := client.Touch(ctx, server.Addr(), cachewire.TouchRequest{
+		Key:              key,
+		TTLMillis:        1000,
+		NamespaceVersion: 2,
+		SpaceVersion:     1,
+	})
+	if err != nil {
+		t.Fatalf("touch mismatched version: %v", err)
+	}
+	if touched.Touched {
+		t.Fatalf("touch mismatched version = %+v, want false", touched)
+	}
+
+	touched, err = client.Touch(ctx, server.Addr(), cachewire.TouchRequest{
+		Key:              key,
+		TTLMillis:        1000,
+		NamespaceVersion: 1,
+		SpaceVersion:     1,
+	})
+	if err != nil {
+		t.Fatalf("touch matching version: %v", err)
+	}
+	if !touched.Touched {
+		t.Fatalf("touch matching version = %+v, want true", touched)
+	}
+}
+
 func TestClientServerBatchSetGet(t *testing.T) {
 	eng := engine.NewMemory(engine.Config{ShardCount: 2})
 	defer closeEngine(t, eng)
