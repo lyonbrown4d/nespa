@@ -18,10 +18,12 @@ func addServerFlags(flags *pflag.FlagSet) {
 	flags.Duration("control-liveness-sweep-interval", 5*time.Second, "control-plane node liveness sweep interval")
 	flags.Duration("control-liveness-suspect-after", 15*time.Second, "mark data nodes suspect after this heartbeat age")
 	flags.Duration("control-liveness-dead-after", 30*time.Second, "mark data nodes dead after this heartbeat age")
+	flags.Bool("frontend-enabled", true, "enable frontend webui/debug module")
 	flags.String("frontend-addr", "127.0.0.1:7402", "frontend HTTP listen address")
 	flags.String("node-addr", "127.0.0.1:7403", "data-node TCP listen address")
 	flags.String("node-id", "node-1", "data-node identifier")
 	flags.Duration("node-heartbeat-interval", 5*time.Second, "data-node control-plane heartbeat interval")
+	flags.Bool("admin-enabled", true, "enable admin API module")
 	flags.String("admin-addr", "127.0.0.1:7404", "admin HTTP listen address")
 	flags.Uint64("node-quota-namespace-memory-bytes", 0, "default namespace memory quota for the data node; 0 disables the limit")
 	flags.Uint64("node-quota-space-memory-bytes", 0, "default space memory quota for the data node; 0 disables the limit")
@@ -51,10 +53,12 @@ func serverDefaults() map[string]any {
 		"control.liveness.sweep.interval":   5 * time.Second,
 		"control.liveness.suspect.after":    15 * time.Second,
 		"control.liveness.dead.after":       30 * time.Second,
+		"frontend.enabled":                  true,
 		"frontend.addr":                     "127.0.0.1:7402",
 		"node.addr":                         "127.0.0.1:7403",
 		"node.id":                           "node-1",
 		"node.heartbeat.interval":           5 * time.Second,
+		"admin.enabled":                     true,
 		"admin.addr":                        "127.0.0.1:7404",
 		"node.quota.namespace.memory.bytes": uint64(0),
 		"node.quota.space.memory.bytes":     uint64(0),

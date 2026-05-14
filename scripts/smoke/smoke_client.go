@@ -1,3 +1,4 @@
+// Package main implements a lightweight smoke utility for routed TCP client checks.
 package main
 
 import (
@@ -5,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/lyonbrown4d/nespa/cachewire"
@@ -34,11 +36,11 @@ func main() {
 
 	ctx := context.Background()
 
-	if _, err := routed.Set(ctx, cachewire.SetRequest{
+	if _, setErr := routed.Set(ctx, cachewire.SetRequest{
 		Key:   cacheKey,
 		Value: []byte(*value),
-	}); err != nil {
-		log.Fatalf("set: %v", err)
+	}); setErr != nil {
+		log.Fatalf("set: %v", setErr)
 	}
 
 	record, err := routed.Get(ctx, cachewire.GetRequest{Key: cacheKey})
@@ -52,6 +54,10 @@ func main() {
 		log.Fatalf("value mismatch: got=%q want=%q", string(record.Value), *value)
 	}
 
-	fmt.Println("routed tcp set/get ok")
-	fmt.Println("smoke ok")
+	if _, err := fmt.Fprintln(os.Stdout, "routed tcp set/get ok"); err != nil {
+		log.Fatalf("write smoke output: %v", err)
+	}
+	if _, err := fmt.Fprintln(os.Stdout, "smoke ok"); err != nil {
+		log.Fatalf("write smoke output: %v", err)
+	}
 }

@@ -82,7 +82,8 @@ func versionCommand(stdout io.Writer) *cobra.Command {
 }
 
 type endpointConfig struct {
-	Addr string `mapstructure:"addr"`
+	Enabled bool   `mapstructure:"enabled"`
+	Addr    string `mapstructure:"addr"`
 }
 
 type memoryConfig struct {
@@ -134,7 +135,8 @@ type heartbeatConfig struct {
 }
 
 type frontendConfig struct {
-	Addr string `mapstructure:"addr"`
+	Enabled bool   `mapstructure:"enabled"`
+	Addr    string `mapstructure:"addr"`
 }
 
 type serverConfig struct {
@@ -178,27 +180,49 @@ func bannerModule(stdout io.Writer) dix.Module {
 }
 
 func endpoints(cfg serverConfig) *collectionlist.List[endpointInfo] {
-	return collectionlist.NewList(
-		endpointInfo{name: "control", scheme: "http", addr: cfg.Control.Addr},
-		endpointInfo{name: "frontend", scheme: "http", addr: cfg.Frontend.Addr},
-		endpointInfo{name: "node", scheme: "tcp", addr: cfg.Node.Addr},
-		endpointInfo{name: "admin", scheme: "http", addr: cfg.Admin.Addr},
-	)
+	items := []endpointInfo{
+		{name: "control", scheme: "http", addr: cfg.Control.Addr},
+		{name: "node", scheme: "tcp", addr: cfg.Node.Addr},
+	}
+
+	if cfg.Frontend.Enabled && cfg.Frontend.Addr != "" {
+		items = append(items, endpointInfo{name: "frontend", scheme: "http", addr: cfg.Frontend.Addr})
+	}
+	if cfg.Admin.Enabled && cfg.Admin.Addr != "" {
+		items = append(items, endpointInfo{name: "admin", scheme: "http", addr: cfg.Admin.Addr})
+	}
+
+	return collectionlist.NewList(items...)
 }
 
 func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags *pflag.FlagSet) error {
+	cfg, err := loadServerConfig(configSource{
+		Flags:     flags,
+		EnvPrefix: "NESPA",
+		Defaults:  serverDefaults(),
+	})
+	if err != nil {
+		return fmt.Errorf("load server config: %w", err)
+	}
+
+	modules := []dix.Module{
+		foundationModule(logger),
+		configModule(flags),
+		bannerModule(stdout),
+		controlModule(),
+		nodeModule(),
+	}
+	if cfg.Frontend.Enabled {
+		modules = append(modules, frontendModule())
+	}
+	if cfg.Admin.Enabled {
+		modules = append(modules, adminModule())
+	}
+
 	app := dix.New("nespa",
 		dix.WithLogger(logger),
 		dix.WithRecentEvents(128),
-		dix.WithModules(
-			foundationModule(logger),
-			configModule(flags),
-			bannerModule(stdout),
-			controlModule(),
-			frontendModule(),
-			nodeModule(),
-			adminModule(),
-		),
+		dix.WithModules(modules...),
 		dix.WithRunStopTimeout(5*time.Second),
 	)
 

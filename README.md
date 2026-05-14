@@ -3,8 +3,8 @@
 Nespa is a namespace-native, space-isolated, queryable distributed cache platform.
 
 This repository currently contains the first runnable scaffold: a Cobra-powered
-Go command that starts the control plane, frontend, data node, and admin API as
-one local server.
+Go command that starts the control plane and data node as core services in one local
+server. Frontend and admin are optional via flags and can be disabled.
 
 The scaffold follows the design document's foundation-package direction:
 
@@ -31,21 +31,24 @@ go run ./cmd
 pwsh ./scripts/smoke.ps1
 ```
 
-The smoke script starts a local server, creates `orders/session/SessionView` catalog metadata, waits for route materialization, runs a routed TCP set/get, and validates admin summary.
+The smoke script starts a local server, creates `orders/session/SessionView` catalog
+metadata, waits for route materialization, runs a routed TCP set/get, and
+validates admin summary when admin is enabled.
 
-Optional overrides can be passed, e.g.:
+Optional overrides and feature toggles can be passed, e.g.:
 
 ```bash
 pwsh ./scripts/smoke.ps1 -ControlAddr 127.0.0.1:17401 -FrontendAddr 127.0.0.1:17402 -NodeAddr 127.0.0.1:17403 -AdminAddr 127.0.0.1:17404
+pwsh ./scripts/smoke.ps1 -ControlAddr 127.0.0.1:17401 -FrontendEnabled $false -AdminEnabled $false
 ```
 
 Default local endpoints:
 
 ```text
 control   http://127.0.0.1:7401
-frontend  http://127.0.0.1:7402
+frontend  http://127.0.0.1:7402 (optional, can be disabled)
 node      tcp://127.0.0.1:7403
-admin     http://127.0.0.1:7404
+admin     http://127.0.0.1:7404 (optional, can be disabled)
 ```
 
 Health checks:
@@ -55,6 +58,9 @@ curl http://127.0.0.1:7401/healthz
 curl http://127.0.0.1:7402/healthz
 curl http://127.0.0.1:7404/healthz
 ```
+
+If frontend is disabled, skip `curl` calls against `http://127.0.0.1:7402/*`.
+If admin is disabled, skip calls against `http://127.0.0.1:7404/*`.
 
 Control-plane snapshot and vslot routes:
 
@@ -102,10 +108,19 @@ Useful startup flags:
 go run ./cmd \
   --control-addr 127.0.0.1:7401 \
   --control-cluster-id local \
+  --frontend-enabled true \
   --frontend-addr 127.0.0.1:7402 \
   --node-addr 127.0.0.1:7403 \
   --node-id node-1 \
+  --admin-enabled true \
   --admin-addr 127.0.0.1:7404
+```
+```bash
+go run ./cmd \
+  --control-addr 127.0.0.1:7401 \
+  --control-cluster-id local \
+  --frontend-enabled false \
+  --admin-enabled false
 ```
 
 Quota flags use bytes. A value of `0` disables that limit.

@@ -4,6 +4,8 @@ param(
     [string]$FrontendAddr = "127.0.0.1:7402",
     [string]$NodeAddr = "127.0.0.1:7403",
     [string]$AdminAddr = "127.0.0.1:7404",
+    [string]$FrontendEnabled = "true",
+    [string]$AdminEnabled = "true",
     [string]$Namespace = "orders",
     [string]$Space = "session",
     [string]$Entity = "SessionView",
@@ -40,6 +42,33 @@ function Ensure-UriAlive {
         }
     }
     throw "timeout waiting for $Uri"
+}
+
+function Parse-Bool {
+    param(
+        [string]$Value,
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        throw "invalid value for ${Name}: '$Value'"
+    }
+
+    switch ($Value.Trim().ToLowerInvariant()) {
+        "1" { return $true }
+        "true" { return $true }
+        "t" { return $true }
+        "on" { return $true }
+        "yes" { return $true }
+        "y" { return $true }
+        "0" { return $false }
+        "false" { return $false }
+        "f" { return $false }
+        "off" { return $false }
+        "no" { return $false }
+        "n" { return $false }
+        default { throw "invalid value for ${Name}: '$Value'" }
+    }
 }
 
 function Post-Control {
@@ -87,30 +116,45 @@ Write-Host "build server and client"
     Set-Location $repoRoot
     go build -o $serverExe ./cmd
     go build -o $clientExe ./scripts/smoke
+    $frontendEnabled = Parse-Bool -Value $FrontendEnabled -Name "FrontendEnabled"
+    $adminEnabled = Parse-Bool -Value $AdminEnabled -Name "AdminEnabled"
 
     Write-Host "start server"
-    $server = Start-Process -FilePath $serverExe -ArgumentList @(
+    $serverArgs = @(
         "--control-addr", $ControlAddr,
         "--control-cluster-id", "smoke",
+        "--frontend-enabled", (& {
+            if ($frontendEnabled) { "true" } else { "false" }
+        }),
         "--frontend-addr", $FrontendAddr,
         "--node-addr", $NodeAddr,
         "--node-id", "smoke-node",
         "--node-heartbeat-interval", "${HeartbeatMs}ms",
+        "--admin-enabled", (& {
+            if ($adminEnabled) { "true" } else { "false" }
+        }),
         "--admin-addr", $AdminAddr
-    ) -RedirectStandardOutput $serverLog -RedirectStandardError "$workDir\\server.err" -PassThru
+    )
+    $server = Start-Process -FilePath $serverExe -ArgumentList $serverArgs -RedirectStandardOutput $serverLog -RedirectStandardError "$workDir\\server.err" -PassThru
 
     try {
         Ensure-UriAlive -Uri "$controlBase/healthz"
-        Ensure-UriAlive -Uri "$frontendBase/healthz"
-        Ensure-UriAlive -Uri "$adminBase/healthz"
+        if ($frontendEnabled) {
+            Ensure-UriAlive -Uri "$frontendBase/healthz"
+        }
+        if ($adminEnabled) {
+            Ensure-UriAlive -Uri "$adminBase/healthz"
+        }
 
         New-ControlCatalog
         Wait-SnapshotReady
         Invoke-SmokeClient
 
-        $adminSummary = Get-Json -Uri "$adminBase/v1/admin/summary"
-        if ($adminSummary.control_addr -ne $ControlAddr) {
-            throw "admin summary control_addr mismatch: $($adminSummary.control_addr) != $ControlAddr"
+        if ($adminEnabled) {
+            $adminSummary = Get-Json -Uri "$adminBase/v1/admin/summary"
+            if ($adminSummary.control_addr -ne $ControlAddr) {
+                throw "admin summary control_addr mismatch: $($adminSummary.control_addr) != $ControlAddr"
+            }
         }
 
         Write-Host "smoke ok"
