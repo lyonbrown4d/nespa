@@ -25,6 +25,20 @@ components expose plain constructors, HTTP configs, and lifecycle functions;
 go run ./cmd
 ```
 
+### Smoke Validation
+
+```bash
+pwsh ./scripts/smoke.ps1
+```
+
+The smoke script starts a local server, creates `orders/session/SessionView` catalog metadata, waits for route materialization, runs a routed TCP set/get, and validates admin summary.
+
+Optional overrides can be passed, e.g.:
+
+```bash
+pwsh ./scripts/smoke.ps1 -ControlAddr 127.0.0.1:17401 -FrontendAddr 127.0.0.1:17402 -NodeAddr 127.0.0.1:17403 -AdminAddr 127.0.0.1:17404
+```
+
 Default local endpoints:
 
 ```text
