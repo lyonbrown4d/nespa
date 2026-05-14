@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"sort"
@@ -107,9 +106,6 @@ func (e *MemoryEngine) Exists(ctx context.Context, key Key, opts GetOptions) (bo
 func (e *MemoryEngine) Touch(ctx context.Context, key Key, opts TouchOptions) (bool, error) {
 	if err := validateKey(key); err != nil {
 		return false, err
-	}
-	if opts.TTL <= 0 {
-		return false, errors.New("engine: touch ttl must be positive")
 	}
 
 	result, err := e.execute(ctx, shardCommand{

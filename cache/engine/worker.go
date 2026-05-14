@@ -123,6 +123,9 @@ func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
 	if !ok {
 		return shardResult{}
 	}
+	if cmd.touch.TTL < 0 {
+		return shardResult{}
+	}
 	if ent.expired(cmd.now) {
 		s.deleteEntry(cmd.physical, ent)
 		return shardResult{}
@@ -131,7 +134,11 @@ func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
 		return shardResult{}
 	}
 
-	ent.expireAt = cmd.now.Add(cmd.touch.TTL)
+	if cmd.touch.TTL > 0 {
+		ent.expireAt = cmd.now.Add(cmd.touch.TTL)
+	} else {
+		ent.expireAt = time.Time{}
+	}
 	ent.updatedAt = cmd.now
 	ent.lastAccessAt = cmd.now
 	ent.accessCount++
