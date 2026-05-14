@@ -152,8 +152,9 @@ type configSource struct {
 }
 
 type endpointInfo struct {
-	name string
-	addr string
+	name   string
+	scheme string
+	addr   string
 }
 
 func bannerModule(stdout io.Writer) dix.Module {
@@ -165,7 +166,7 @@ func bannerModule(stdout io.Writer) dix.Module {
 				}
 				var writeErr error
 				endpoints(cfg).Range(func(_ int, endpoint endpointInfo) bool {
-					_, writeErr = fmt.Fprintf(stdout, "  %-10s http://%s\n", endpoint.name, endpoint.addr)
+					_, writeErr = fmt.Fprintf(stdout, "  %-10s %s://%s\n", endpoint.name, endpoint.scheme, endpoint.addr)
 					return writeErr == nil
 				})
 				if writeErr != nil {
@@ -179,10 +180,10 @@ func bannerModule(stdout io.Writer) dix.Module {
 
 func endpoints(cfg serverConfig) *collectionlist.List[endpointInfo] {
 	return collectionlist.NewList(
-		endpointInfo{name: "control", addr: cfg.Control.Addr},
-		endpointInfo{name: "frontend", addr: cfg.Frontend.Addr},
-		endpointInfo{name: "node", addr: cfg.Node.Addr},
-		endpointInfo{name: "admin", addr: cfg.Admin.Addr},
+		endpointInfo{name: "control", scheme: "http", addr: cfg.Control.Addr},
+		endpointInfo{name: "frontend", scheme: "http", addr: cfg.Frontend.Addr},
+		endpointInfo{name: "node", scheme: "tcp", addr: cfg.Node.Addr},
+		endpointInfo{name: "admin", scheme: "http", addr: cfg.Admin.Addr},
 	)
 }
 

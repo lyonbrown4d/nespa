@@ -3,11 +3,17 @@ module github.com/lyonbrown4d/nespa
 go 1.26.3
 
 require (
+	github.com/arcgolabs/clientx v0.1.2
+	github.com/arcgolabs/collectionx/list v0.8.0
+	github.com/arcgolabs/collectionx/mapping v0.8.0
 	github.com/arcgolabs/configx v0.3.2
 	github.com/arcgolabs/dix v0.10.0
 	github.com/arcgolabs/eventx v0.1.2
 	github.com/arcgolabs/httpx v0.1.5
+	github.com/arcgolabs/httpx/adapter/fiber v0.1.1
 	github.com/arcgolabs/logx v0.1.2
+	github.com/gofiber/fiber/v2 v2.52.12
+	github.com/gofiber/template/html/v2 v2.1.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 )
@@ -15,10 +21,7 @@ require (
 require (
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/arcgolabs/collectionx/graph v0.8.0 // indirect
-	github.com/arcgolabs/collectionx/list v0.8.0 // indirect
-	github.com/arcgolabs/collectionx/mapping v0.8.0 // indirect
 	github.com/arcgolabs/collectionx/set v0.8.0 // indirect
-	github.com/arcgolabs/httpx/adapter/fiber v0.1.1 // indirect
 	github.com/arcgolabs/httpx/adapter/std v0.1.5 // indirect
 	github.com/arcgolabs/observabilityx v0.4.0 // indirect
 	github.com/arcgolabs/pkg/option v0.0.3 // indirect
@@ -32,9 +35,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/gofiber/fiber/v2 v2.52.12 // indirect
 	github.com/gofiber/template v1.8.3 // indirect
-	github.com/gofiber/template/html/v2 v2.1.3 // indirect
 	github.com/gofiber/utils v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

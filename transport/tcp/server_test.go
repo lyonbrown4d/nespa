@@ -2,12 +2,14 @@ package tcp_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 
 	"github.com/lyonbrown4d/nespa/cache"
 	"github.com/lyonbrown4d/nespa/cache/engine"
-	"github.com/lyonbrown4d/nespa/cacheapi"
+	"github.com/lyonbrown4d/nespa/cachewire"
+	"github.com/lyonbrown4d/nespa/protocol"
 	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
 )
 
@@ -23,7 +25,10 @@ func TestClientServerSetGetDelete(t *testing.T) {
 	defer stopServer(t, server)
 
 	client := cachetcp.NewClient()
-	set, err := client.Set(ctx, server.Addr(), cacheapi.SetBody{Namespace: "ns", Space: "sp", Key: "k", Value: "v"})
+	set, err := client.Set(ctx, server.Addr(), cachewire.SetRequest{
+		Key:   cachewire.Key{Namespace: "ns", Space: "sp", Key: "k"},
+		Value: []byte("v"),
+	})
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -31,20 +36,102 @@ func TestClientServerSetGetDelete(t *testing.T) {
 		t.Fatalf("unexpected set response: %+v", set)
 	}
 
-	get, err := client.Get(ctx, server.Addr(), cacheapi.GetInput{Namespace: "ns", Space: "sp", Key: "k"})
+	get, err := client.Get(ctx, server.Addr(), cachewire.GetRequest{Key: cachewire.Key{Namespace: "ns", Space: "sp", Key: "k"}})
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if !get.Found || get.Value != "v" {
+	if !get.Found || string(get.Value) != "v" {
 		t.Fatalf("unexpected get response: %+v", get)
 	}
 
-	del, err := client.Delete(ctx, server.Addr(), cacheapi.DeleteInput{Namespace: "ns", Space: "sp", Key: "k"})
+	del, err := client.Delete(ctx, server.Addr(), cachewire.DeleteRequest{Key: cachewire.Key{Namespace: "ns", Space: "sp", Key: "k"}})
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	if !del.Deleted {
 		t.Fatalf("unexpected delete response: %+v", del)
+	}
+}
+
+func TestClientServerBatchSetGet(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	set, err := client.BatchSet(ctx, server.Addr(), cachewire.BatchSetRequest{
+		Items: []cachewire.SetRequest{
+			{Key: cachewire.Key{Namespace: "ns", Space: "sp", Key: "a"}, Value: []byte("alpha")},
+			{Key: cachewire.Key{Namespace: "ns", Space: "sp", Key: "b"}, Value: []byte("beta")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("batch set: %v", err)
+	}
+	if len(set.Records) != 2 || set.Records[0].Version != 1 || set.Records[1].Version != 1 {
+		t.Fatalf("unexpected batch set response: %+v", set)
+	}
+
+	get, err := client.BatchGet(ctx, server.Addr(), cachewire.BatchGetRequest{
+		Items: []cachewire.GetRequest{
+			{Key: cachewire.Key{Namespace: "ns", Space: "sp", Key: "a"}},
+			{Key: cachewire.Key{Namespace: "ns", Space: "sp", Key: "missing"}},
+			{Key: cachewire.Key{Namespace: "ns", Space: "sp", Key: "b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("batch get: %v", err)
+	}
+	requireBatchGet(t, get)
+}
+
+func requireBatchGet(t *testing.T, get cachewire.BatchGetResponse) {
+	t.Helper()
+	if len(get.Records) != 3 {
+		t.Fatalf("unexpected batch get count: %+v", get)
+	}
+	if !get.Records[0].Found || string(get.Records[0].Value) != "alpha" {
+		t.Fatalf("unexpected first batch get record: %+v", get.Records[0])
+	}
+	if get.Records[1].Found {
+		t.Fatalf("unexpected missing batch get record: %+v", get.Records[1])
+	}
+	if !get.Records[2].Found || string(get.Records[2].Value) != "beta" {
+		t.Fatalf("unexpected second batch get record: %+v", get.Records[2])
+	}
+}
+
+func TestClientServerInvalidKeyReturnsProtocolError(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	_, err := client.Set(ctx, server.Addr(), cachewire.SetRequest{
+		Key:   cachewire.Key{Namespace: "ns", Space: "sp"},
+		Value: []byte("v"),
+	})
+	if err == nil {
+		t.Fatal("expected invalid key error")
+	}
+	wireErr, ok := errors.AsType[cachewire.Error](err)
+	if !ok {
+		t.Fatalf("expected cachewire.Error, got %T", err)
+	}
+	if wireErr.Code != protocol.ErrorBadFrame {
+		t.Fatalf("unexpected error code: %d", wireErr.Code)
 	}
 }
 

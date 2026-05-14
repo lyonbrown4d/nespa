@@ -86,8 +86,13 @@ metadata     []byte
 payload      []byte
 ```
 
-`metadata` is opaque protocol metadata for now, while `payload` is raw binary
-cache value bytes. The codec lives in `protocol`.
+`metadata` carries `cachewire` DTOs and protocol errors, while `payload` carries
+raw cache value bytes. Batch set/get uses payload offsets in metadata so values
+do not need to be JSON encoded. The codec lives in `protocol`.
+
+The public TCP client SDK lives in `client` and uses `transport/tcp` underneath;
+the transport client uses `github.com/arcgolabs/clientx/tcp` for dialing,
+timeouts, and client policies.
 
 ## Verify
 

@@ -9,11 +9,9 @@ import (
 	"log/slog"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/lyonbrown4d/nespa/cache"
-	"github.com/lyonbrown4d/nespa/cache/engine"
-	"github.com/lyonbrown4d/nespa/cacheapi"
+	"github.com/lyonbrown4d/nespa/cachewire"
 	"github.com/lyonbrown4d/nespa/protocol"
 )
 
@@ -132,26 +130,27 @@ func (s *Server) handleFrame(ctx context.Context, frame protocol.Frame) protocol
 		return s.handleGet(ctx, frame)
 	case protocol.OpCacheDelete:
 		return s.handleDelete(ctx, frame)
-	case protocol.OpCacheBatchGet, protocol.OpCacheBatchSet, protocol.OpNodeHeartbeat, protocol.OpControlSnapshot, protocol.OpControlWatch:
-		return errorFrame(frame, "unsupported_op", fmt.Errorf("unsupported cache op %d", frame.Op))
+	case protocol.OpCacheBatchSet:
+		return s.handleBatchSet(ctx, frame)
+	case protocol.OpCacheBatchGet:
+		return s.handleBatchGet(ctx, frame)
+	case protocol.OpNodeHeartbeat, protocol.OpControlSnapshot, protocol.OpControlWatch:
+		return errorFrame(frame, protocol.ErrorBadFrame, fmt.Errorf("unsupported cache op %d", frame.Op))
 	default:
-		return errorFrame(frame, "unsupported_op", fmt.Errorf("unsupported cache op %d", frame.Op))
+		return errorFrame(frame, protocol.ErrorBadFrame, fmt.Errorf("unsupported cache op %d", frame.Op))
 	}
 }
 
 func (s *Server) handleSet(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	var body cacheapi.SetBody
-	if err := json.Unmarshal(frame.Metadata, &body); err != nil {
-		return errorFrame(frame, "bad_metadata", err)
+	var request cachewire.SetRequest
+	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
 	value := frame.Payload
-	if len(value) == 0 {
-		value = []byte(body.Value)
-	}
-	rec, err := s.service.Set(ctx, keyFromSet(body), value, cache.SetOptions{
-		TTL:              ttlFromMillis(body.TTLMillis),
-		NamespaceVersion: body.NamespaceVersion,
-		SpaceVersion:     body.SpaceVersion,
+	rec, err := s.service.Set(ctx, keyFromWire(request.Key), value, cache.SetOptions{
+		TTL:              ttlFromMillis(request.TTLMillis),
+		NamespaceVersion: request.NamespaceVersion,
+		SpaceVersion:     request.SpaceVersion,
 	})
 	if err != nil {
 		return cacheErrorFrame(frame, err)
@@ -160,13 +159,13 @@ func (s *Server) handleSet(ctx context.Context, frame protocol.Frame) protocol.F
 }
 
 func (s *Server) handleGet(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	var input cacheapi.GetInput
-	if err := json.Unmarshal(frame.Metadata, &input); err != nil {
-		return errorFrame(frame, "bad_metadata", err)
+	var request cachewire.GetRequest
+	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
-	rec, found, err := s.service.Get(ctx, keyFromGet(input), cache.GetOptions{
-		NamespaceVersion: input.NamespaceVersion,
-		SpaceVersion:     input.SpaceVersion,
+	rec, found, err := s.service.Get(ctx, keyFromWire(request.Key), cache.GetOptions{
+		NamespaceVersion: request.NamespaceVersion,
+		SpaceVersion:     request.SpaceVersion,
 	})
 	if err != nil {
 		return cacheErrorFrame(frame, err)
@@ -175,92 +174,53 @@ func (s *Server) handleGet(ctx context.Context, frame protocol.Frame) protocol.F
 }
 
 func (s *Server) handleDelete(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	var input cacheapi.DeleteInput
-	if err := json.Unmarshal(frame.Metadata, &input); err != nil {
-		return errorFrame(frame, "bad_metadata", err)
+	var request cachewire.DeleteRequest
+	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
-	deleted, err := s.service.Delete(ctx, keyFromDelete(input))
+	deleted, err := s.service.Delete(ctx, keyFromWire(request.Key))
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
-	return jsonFrame(frame, cacheapi.DeleteBody{Deleted: deleted}, nil)
+	return jsonFrame(frame, cachewire.DeleteResponse{Deleted: deleted}, nil)
+}
+
+func (s *Server) handleBatchSet(ctx context.Context, frame protocol.Frame) protocol.Frame {
+	var request cachewire.BatchSetRequest
+	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
+	}
+	items, err := cachewire.UnpackBatchSet(request, frame.Payload)
+	if err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
+	}
+	records, err := s.service.BatchSet(ctx, batchSetRequests(items))
+	if err != nil {
+		return cacheErrorFrame(frame, err)
+	}
+	return jsonFrame(frame, cachewire.BatchSetResponse{Records: recordsFromCache(records)}, nil)
+}
+
+func (s *Server) handleBatchGet(ctx context.Context, frame protocol.Frame) protocol.Frame {
+	var request cachewire.BatchGetRequest
+	if err := json.Unmarshal(frame.Metadata, &request); err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
+	}
+	results, err := s.service.BatchGet(ctx, batchGetRequests(request.Items))
+	if err != nil {
+		return cacheErrorFrame(frame, err)
+	}
+	response, payload, err := cachewire.PackRecords(recordsFromResults(results))
+	if err != nil {
+		return errorFrame(frame, protocol.ErrorInternal, err)
+	}
+	return jsonFrame(frame, response, payload)
 }
 
 func recordFrame(frame protocol.Frame, rec cache.Record, found bool) protocol.Frame {
 	if !found {
-		return jsonFrame(frame, cacheapi.RecordBody{Found: false}, nil)
+		return jsonFrame(frame, cachewire.Record{Found: false}, nil)
 	}
-	body := cacheapi.RecordBody{
-		Found:            true,
-		Namespace:        rec.Key.Namespace,
-		Space:            rec.Key.Space,
-		Entity:           rec.Key.Entity,
-		Key:              rec.Key.Key,
-		Version:          rec.Version,
-		NamespaceVersion: rec.NamespaceVersion,
-		SpaceVersion:     rec.SpaceVersion,
-	}
-	if !rec.ExpireAt.IsZero() {
-		body.ExpireAtUnixMs = rec.ExpireAt.UnixMilli()
-	}
+	body := recordFromCache(rec, true)
 	return jsonFrame(frame, body, rec.Value)
-}
-
-func jsonFrame(request protocol.Frame, metadata any, payload []byte) protocol.Frame {
-	raw, err := json.Marshal(metadata)
-	if err != nil {
-		return errorFrame(request, "encode_metadata", err)
-	}
-	return protocol.Frame{
-		Flags:      protocol.FlagResponse,
-		Op:         request.Op,
-		RequestID:  request.RequestID,
-		RouteEpoch: request.RouteEpoch,
-		Metadata:   raw,
-		Payload:    payload,
-	}
-}
-
-func cacheErrorFrame(request protocol.Frame, err error) protocol.Frame {
-	switch {
-	case errors.Is(err, cache.ErrQuotaExceeded):
-		return errorFrame(request, "quota_exceeded", err)
-	case errors.Is(err, engine.ErrInvalidKey):
-		return errorFrame(request, "invalid_key", err)
-	default:
-		return errorFrame(request, "internal", err)
-	}
-}
-
-func errorFrame(request protocol.Frame, code string, err error) protocol.Frame {
-	raw, marshalErr := json.Marshal(cacheapi.ErrorBody{Code: code, Message: err.Error()})
-	if marshalErr != nil {
-		raw = []byte(`{"code":"internal","message":"cache tcp error"}`)
-	}
-	return protocol.Frame{
-		Flags:      protocol.FlagResponse | protocol.FlagError,
-		Op:         request.Op,
-		RequestID:  request.RequestID,
-		RouteEpoch: request.RouteEpoch,
-		Metadata:   raw,
-	}
-}
-
-func keyFromSet(body cacheapi.SetBody) cache.Key {
-	return cache.Key{Namespace: body.Namespace, Space: body.Space, Entity: body.Entity, Key: body.Key}
-}
-
-func keyFromGet(input cacheapi.GetInput) cache.Key {
-	return cache.Key{Namespace: input.Namespace, Space: input.Space, Entity: input.Entity, Key: input.Key}
-}
-
-func keyFromDelete(input cacheapi.DeleteInput) cache.Key {
-	return cache.Key{Namespace: input.Namespace, Space: input.Space, Entity: input.Entity, Key: input.Key}
-}
-
-func ttlFromMillis(ms int64) time.Duration {
-	if ms <= 0 {
-		return 0
-	}
-	return time.Duration(ms) * time.Millisecond
 }

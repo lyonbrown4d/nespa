@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
+	"io"
 	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/lyonbrown4d/nespa/cacheapi"
+	clienttcp "github.com/arcgolabs/clientx/tcp"
+	"github.com/lyonbrown4d/nespa/cachewire"
 	"github.com/lyonbrown4d/nespa/protocol"
 )
 
@@ -29,33 +30,66 @@ func NewClient() *Client {
 	}
 }
 
-func (c *Client) Set(ctx context.Context, addr string, body cacheapi.SetBody) (cacheapi.RecordBody, error) {
-	payload := []byte(body.Value)
-	body.Value = ""
-	frame, err := c.do(ctx, addr, protocol.OpCacheSet, body, payload)
+func (c *Client) Set(ctx context.Context, addr string, request cachewire.SetRequest) (cachewire.Record, error) {
+	payload := request.Value
+	request.Value = nil
+	frame, err := c.do(ctx, addr, protocol.OpCacheSet, request, payload)
 	if err != nil {
-		return cacheapi.RecordBody{}, err
+		return cachewire.Record{}, err
 	}
 	return decodeRecord(frame)
 }
 
-func (c *Client) Get(ctx context.Context, addr string, input cacheapi.GetInput) (cacheapi.RecordBody, error) {
-	frame, err := c.do(ctx, addr, protocol.OpCacheGet, input, nil)
+func (c *Client) Get(ctx context.Context, addr string, request cachewire.GetRequest) (cachewire.Record, error) {
+	frame, err := c.do(ctx, addr, protocol.OpCacheGet, request, nil)
 	if err != nil {
-		return cacheapi.RecordBody{}, err
+		return cachewire.Record{}, err
 	}
 	return decodeRecord(frame)
 }
 
-func (c *Client) Delete(ctx context.Context, addr string, input cacheapi.DeleteInput) (cacheapi.DeleteBody, error) {
-	frame, err := c.do(ctx, addr, protocol.OpCacheDelete, input, nil)
+func (c *Client) Delete(ctx context.Context, addr string, request cachewire.DeleteRequest) (cachewire.DeleteResponse, error) {
+	frame, err := c.do(ctx, addr, protocol.OpCacheDelete, request, nil)
 	if err != nil {
-		return cacheapi.DeleteBody{}, err
+		return cachewire.DeleteResponse{}, err
 	}
-	var out cacheapi.DeleteBody
-	if err := json.Unmarshal(frame.Metadata, &out); err != nil {
-		return out, fmt.Errorf("decode cache delete response: %w", err)
+	var out cachewire.DeleteResponse
+	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+		return out, fmt.Errorf("decode cache delete response: %w", decodeErr)
 	}
+	return out, nil
+}
+
+func (c *Client) BatchSet(ctx context.Context, addr string, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
+	metadata, payload, err := cachewire.PackBatchSet(request)
+	if err != nil {
+		return cachewire.BatchSetResponse{}, fmt.Errorf("pack cache batch set request: %w", err)
+	}
+	frame, err := c.do(ctx, addr, protocol.OpCacheBatchSet, metadata, payload)
+	if err != nil {
+		return cachewire.BatchSetResponse{}, err
+	}
+	var out cachewire.BatchSetResponse
+	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+		return out, fmt.Errorf("decode cache batch set response: %w", decodeErr)
+	}
+	return out, nil
+}
+
+func (c *Client) BatchGet(ctx context.Context, addr string, request cachewire.BatchGetRequest) (cachewire.BatchGetResponse, error) {
+	frame, err := c.do(ctx, addr, protocol.OpCacheBatchGet, request, nil)
+	if err != nil {
+		return cachewire.BatchGetResponse{}, err
+	}
+	var out cachewire.BatchGetResponse
+	if decodeErr := json.Unmarshal(frame.Metadata, &out); decodeErr != nil {
+		return out, fmt.Errorf("decode cache batch get response: %w", decodeErr)
+	}
+	records, err := cachewire.UnpackRecords(out, frame.Payload)
+	if err != nil {
+		return out, fmt.Errorf("unpack cache batch get response: %w", err)
+	}
+	out.Records = records
 	return out, nil
 }
 
@@ -89,9 +123,18 @@ func (c *Client) do(ctx context.Context, addr string, op protocol.Op, metadata a
 	return frame, nil
 }
 
-func (c *Client) dial(ctx context.Context, addr string) (net.Conn, error) {
-	dialer := net.Dialer{Timeout: c.timeout}
-	conn, err := dialer.DialContext(ctx, "tcp", normalizeAddr(addr))
+func (c *Client) dial(ctx context.Context, addr string) (io.ReadWriteCloser, error) {
+	client, err := clienttcp.New(clienttcp.Config{
+		Address:      normalizeAddr(addr),
+		DialTimeout:  c.timeout,
+		ReadTimeout:  c.timeout,
+		WriteTimeout: c.timeout,
+		KeepAlive:    30 * time.Second,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create cache tcp client: %w", err)
+	}
+	conn, err := client.Dial(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("dial cache tcp server: %w", err)
 	}
@@ -106,29 +149,26 @@ func normalizeAddr(addr string) string {
 	return addr
 }
 
-func decodeRecord(frame protocol.Frame) (cacheapi.RecordBody, error) {
-	var out cacheapi.RecordBody
+func decodeRecord(frame protocol.Frame) (cachewire.Record, error) {
+	var out cachewire.Record
 	if err := json.Unmarshal(frame.Metadata, &out); err != nil {
 		return out, fmt.Errorf("decode cache record response: %w", err)
 	}
 	if len(frame.Payload) > 0 {
-		out.Value = string(frame.Payload)
+		out.Value = append(out.Value[:0], frame.Payload...)
 	}
 	return out, nil
 }
 
 func decodeError(frame protocol.Frame) error {
-	var body cacheapi.ErrorBody
+	var body cachewire.Error
 	if err := json.Unmarshal(frame.Metadata, &body); err != nil {
 		return errors.New("cache tcp error")
 	}
-	if body.Message == "" {
-		return fmt.Errorf("cache tcp error: %s", body.Code)
-	}
-	return fmt.Errorf("cache tcp error: %s", body.Message)
+	return body
 }
 
-func closeConn(conn net.Conn) {
+func closeConn(conn interface{ Close() error }) {
 	if err := conn.Close(); err != nil {
 		return
 	}
