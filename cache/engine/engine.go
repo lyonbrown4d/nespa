@@ -33,6 +33,7 @@ type SetOptions struct {
 	TTL              time.Duration
 	NamespaceVersion uint64
 	SpaceVersion     uint64
+	ExpectedVersion  uint64
 }
 
 type GetOptions struct {
@@ -44,6 +45,7 @@ type TouchOptions struct {
 	TTL              time.Duration
 	NamespaceVersion uint64
 	SpaceVersion     uint64
+	ExpectedVersion  uint64
 }
 
 type EvictOptions struct {
@@ -112,10 +114,14 @@ type SpaceStats struct {
 	MemoryBytes uint64 `json:"memory_bytes"`
 }
 
+type DeleteOptions struct {
+	ExpectedVersion uint64
+}
+
 type Engine interface {
-	Set(context.Context, Key, []byte, SetOptions) (Record, error)
+	Set(context.Context, Key, []byte, SetOptions) (Record, bool, error)
 	Get(context.Context, Key, GetOptions) (Record, bool, error)
-	Delete(context.Context, Key) (bool, error)
+	Delete(context.Context, Key, DeleteOptions) (bool, bool, error)
 	Exists(context.Context, Key, GetOptions) (bool, error)
 	Touch(context.Context, Key, TouchOptions) (bool, error)
 	Stats(context.Context) (Stats, error)
@@ -174,16 +180,17 @@ const (
 )
 
 type shardCommand struct {
-	kind     commandKind
-	physical string
-	key      Key
-	value    []byte
-	setOpts  SetOptions
-	getOpts  GetOptions
-	touch    TouchOptions
-	evict    EvictOptions
-	now      time.Time
-	reply    chan shardResult
+	kind       commandKind
+	physical   string
+	key        Key
+	value      []byte
+	setOpts    SetOptions
+	getOpts    GetOptions
+	touch      TouchOptions
+	deleteOpts DeleteOptions
+	evict      EvictOptions
+	now        time.Time
+	reply      chan shardResult
 }
 
 type shardResult struct {

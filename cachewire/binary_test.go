@@ -21,13 +21,14 @@ func TestBinarySetRequestRoundTrip(t *testing.T) {
 		TTLMillis:        1500,
 		NamespaceVersion: 2,
 		SpaceVersion:     3,
+		ExpectedVersion:  4,
 	}
 
 	out, err := cachewire.DecodeSetRequest(cachewire.EncodeSetRequest(in))
 	if err != nil {
 		t.Fatalf("decode set request: %v", err)
 	}
-	if out.Key != in.Key || out.TTLMillis != in.TTLMillis || out.NamespaceVersion != in.NamespaceVersion || out.SpaceVersion != in.SpaceVersion {
+	if out.Key != in.Key || out.TTLMillis != in.TTLMillis || out.NamespaceVersion != in.NamespaceVersion || out.SpaceVersion != in.SpaceVersion || out.ExpectedVersion != in.ExpectedVersion {
 		t.Fatalf("set request = %+v, want %+v", out, in)
 	}
 	if out.RouteEpoch != 0 || len(out.Value) != 0 {
@@ -52,11 +53,11 @@ func TestBinaryGetRequestRoundTrip(t *testing.T) {
 
 func TestBinaryDeleteRequestRoundTrip(t *testing.T) {
 	key := binaryTestKey()
-	del, err := cachewire.DecodeDeleteRequest(cachewire.EncodeDeleteRequest(cachewire.DeleteRequest{Key: key}))
+	del, err := cachewire.DecodeDeleteRequest(cachewire.EncodeDeleteRequest(cachewire.DeleteRequest{Key: key, ExpectedVersion: 9}))
 	if err != nil {
 		t.Fatalf("decode delete request: %v", err)
 	}
-	if del.Key != key {
+	if del.Key != key || del.ExpectedVersion != 9 {
 		t.Fatalf("delete request = %+v", del)
 	}
 }
@@ -83,11 +84,12 @@ func TestBinaryTouchRequestRoundTrip(t *testing.T) {
 		TTLMillis:        1000,
 		NamespaceVersion: 6,
 		SpaceVersion:     7,
+		ExpectedVersion:  8,
 	}))
 	if err != nil {
 		t.Fatalf("decode touch request: %v", err)
 	}
-	if touch.Key != key || touch.TTLMillis != 1000 || touch.NamespaceVersion != 6 || touch.SpaceVersion != 7 {
+	if touch.Key != key || touch.TTLMillis != 1000 || touch.NamespaceVersion != 6 || touch.SpaceVersion != 7 || touch.ExpectedVersion != 8 {
 		t.Fatalf("touch request = %+v", touch)
 	}
 }

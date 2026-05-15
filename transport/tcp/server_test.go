@@ -53,6 +53,62 @@ func TestClientServerSetGetDelete(t *testing.T) {
 	}
 }
 
+func TestClientServerExpectedVersionEnforced(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	key := cachewire.Key{Namespace: "ns", Space: "sp", Key: "k"}
+	set, err := client.Set(ctx, server.Addr(), cachewire.SetRequest{
+		Key:   key,
+		Value: []byte("v"),
+	})
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	stale, err := client.Set(ctx, server.Addr(), cachewire.SetRequest{
+		Key:             key,
+		Value:           []byte("updated"),
+		ExpectedVersion: set.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("stale set: %v", err)
+	}
+	if stale.Found {
+		t.Fatalf("stale set should not match: %+v", stale)
+	}
+
+	deleted, err := client.Delete(ctx, server.Addr(), cachewire.DeleteRequest{
+		Key:             key,
+		ExpectedVersion: set.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("stale delete: %v", err)
+	}
+	if deleted.Deleted {
+		t.Fatalf("stale delete should not apply: %+v", deleted)
+	}
+
+	touched, err := client.Touch(ctx, server.Addr(), cachewire.TouchRequest{
+		Key:             key,
+		ExpectedVersion: set.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("stale touch: %v", err)
+	}
+	if touched.Touched {
+		t.Fatalf("stale touch should not apply: %+v", touched)
+	}
+}
+
 func TestClientServerExistsHonorsVersions(t *testing.T) {
 	eng := engine.NewMemory(engine.Config{ShardCount: 2})
 	defer closeEngine(t, eng)

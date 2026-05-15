@@ -17,6 +17,10 @@ func (c *metadataCursor) readBatchSetItem() (SetRequest, error) {
 	if err != nil {
 		return SetRequest{}, err
 	}
+	expectedVersion, err := c.readUint64()
+	if err != nil {
+		return SetRequest{}, err
+	}
 	payloadOffset, err := c.readUint32()
 	if err != nil {
 		return SetRequest{}, err
@@ -30,6 +34,7 @@ func (c *metadataCursor) readBatchSetItem() (SetRequest, error) {
 		TTLMillis:        ttlMillis,
 		NamespaceVersion: namespaceVersion,
 		SpaceVersion:     spaceVersion,
+		ExpectedVersion:  expectedVersion,
 		PayloadOffset:    payloadOffset,
 		PayloadSize:      payloadSize,
 	}, nil

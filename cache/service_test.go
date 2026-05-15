@@ -19,18 +19,18 @@ func TestEngineServiceBatchSetGet(t *testing.T) {
 		{Namespace: "order", Space: "session", Key: "b"},
 	}
 
-	records, err := svc.BatchSet(context.Background(), []cache.SetRequest{
+	setResults, err := svc.BatchSet(context.Background(), []cache.SetRequest{
 		{Key: keys[0], Value: []byte("one")},
 		{Key: keys[1], Value: []byte("two")},
 	})
 	if err != nil {
 		t.Fatalf("batch set: %v", err)
 	}
-	if len(records) != 2 {
-		t.Fatalf("records len = %d, want 2", len(records))
+	if len(setResults) != 2 {
+		t.Fatalf("records len = %d, want 2", len(setResults))
 	}
 
-	results, err := svc.BatchGet(context.Background(), []cache.GetRequest{
+	getResults, err := svc.BatchGet(context.Background(), []cache.GetRequest{
 		{Key: keys[0]},
 		{Key: keys[1]},
 		{Key: cache.Key{Namespace: "order", Space: "session", Key: "missing"}},
@@ -38,16 +38,16 @@ func TestEngineServiceBatchSetGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("batch get: %v", err)
 	}
-	if len(results) != 3 {
-		t.Fatalf("results len = %d, want 3", len(results))
+	if len(getResults) != 3 {
+		t.Fatalf("results len = %d, want 3", len(getResults))
 	}
-	if !results[0].Found || string(results[0].Record.Value) != "one" {
-		t.Fatalf("first result = %+v", results[0])
+	if !getResults[0].Found || string(getResults[0].Record.Value) != "one" {
+		t.Fatalf("first result = %+v", getResults[0])
 	}
-	if !results[1].Found || string(results[1].Record.Value) != "two" {
-		t.Fatalf("second result = %+v", results[1])
+	if !getResults[1].Found || string(getResults[1].Record.Value) != "two" {
+		t.Fatalf("second result = %+v", getResults[1])
 	}
-	if results[2].Found {
+	if getResults[2].Found {
 		t.Fatalf("missing result found = true")
 	}
 }
@@ -128,11 +128,91 @@ func TestEngineServiceQuotaTracksDelete(t *testing.T) {
 	if _, err := svc.Set(context.Background(), key, []byte("12345"), cache.SetOptions{}); err != nil {
 		t.Fatalf("set first: %v", err)
 	}
-	if deleted, err := svc.Delete(context.Background(), key); err != nil || !deleted {
+	deleted, applied, err := svc.Delete(context.Background(), key, cache.DeleteOptions{})
+	if err != nil || !deleted || !applied {
 		t.Fatalf("delete: deleted=%v err=%v", deleted, err)
 	}
 	if _, err := svc.Set(context.Background(), key, []byte("12345"), cache.SetOptions{}); err != nil {
 		t.Fatalf("set after delete: %v", err)
+	}
+}
+
+func TestEngineServiceSetRejectsMismatchedExpectedVersion(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	svc := cache.NewService(eng)
+	key := cache.Key{Namespace: "order", Space: "session", Key: "k1"}
+
+	original, err := svc.Set(context.Background(), key, []byte("initial"), cache.SetOptions{})
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	result, err := svc.Set(context.Background(), key, []byte("updated"), cache.SetOptions{
+		ExpectedVersion: original.Record.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("set with mismatched expected version: %v", err)
+	}
+	if result.Found {
+		t.Fatal("set should not match on mismatched expected version")
+	}
+
+	if _, ok, err := svc.Get(context.Background(), key, cache.GetOptions{}); err != nil || !ok {
+		t.Fatalf("record should remain: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestEngineServiceDeleteRejectsMismatchedExpectedVersion(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	svc := cache.NewService(eng)
+	key := cache.Key{Namespace: "order", Space: "session", Key: "k1"}
+
+	set, err := svc.Set(context.Background(), key, []byte("initial"), cache.SetOptions{})
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	deleted, applied, err := svc.Delete(context.Background(), key, cache.DeleteOptions{
+		ExpectedVersion: set.Record.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("delete with mismatched expected version: %v", err)
+	}
+	if deleted {
+		t.Fatal("delete should not hit on mismatched expected version")
+	}
+	if applied {
+		t.Fatal("delete should not apply on mismatched expected version")
+	}
+
+	if _, ok, err := svc.Get(context.Background(), key, cache.GetOptions{}); err != nil || !ok {
+		t.Fatalf("record should remain: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestEngineServiceTouchRejectsMismatchedExpectedVersion(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	svc := cache.NewService(eng)
+	key := cache.Key{Namespace: "order", Space: "session", Key: "k1"}
+	set, err := svc.Set(context.Background(), key, []byte("initial"), cache.SetOptions{})
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	touched, err := svc.Touch(context.Background(), key, cache.TouchOptions{
+		ExpectedVersion: set.Record.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("touch with mismatched expected version: %v", err)
+	}
+	if touched {
+		t.Fatal("touch should miss on mismatched expected version")
 	}
 }
 

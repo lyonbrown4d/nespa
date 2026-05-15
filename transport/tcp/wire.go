@@ -67,6 +67,7 @@ func batchSetRequests(items []cachewire.SetRequest) []cache.SetRequest {
 				TTL:              ttlFromMillis(item.TTLMillis),
 				NamespaceVersion: item.NamespaceVersion,
 				SpaceVersion:     item.SpaceVersion,
+				ExpectedVersion:  item.ExpectedVersion,
 			},
 		})
 	}
@@ -99,18 +100,20 @@ func touchOptionsFromWire(request cachewire.TouchRequest) cache.TouchOptions {
 		TTL:              ttlFromMillis(request.TTLMillis),
 		NamespaceVersion: request.NamespaceVersion,
 		SpaceVersion:     request.SpaceVersion,
+		ExpectedVersion:  request.ExpectedVersion,
 	}
 }
 
-func recordsFromCache(records []cache.Record) []cachewire.Record {
-	out := make([]cachewire.Record, 0, len(records))
-	for index := range records {
-		out = append(out, recordFromCache(records[index], true))
+func recordsFromResults(results []cache.GetResult) []cachewire.Record {
+	out := make([]cachewire.Record, 0, len(results))
+	for index := range results {
+		result := results[index]
+		out = append(out, recordFromCache(result.Record, result.Found))
 	}
 	return out
 }
 
-func recordsFromResults(results []cache.GetResult) []cachewire.Record {
+func recordsFromSetResults(results []cache.SetResult) []cachewire.Record {
 	out := make([]cachewire.Record, 0, len(results))
 	for index := range results {
 		result := results[index]

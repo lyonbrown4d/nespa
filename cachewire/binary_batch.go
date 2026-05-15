@@ -147,6 +147,7 @@ func appendBatchSetItem(raw []byte, item SetRequest) []byte {
 	raw = appendInt64(raw, item.TTLMillis)
 	raw = appendUint64(raw, item.NamespaceVersion)
 	raw = appendUint64(raw, item.SpaceVersion)
+	raw = appendUint64(raw, item.ExpectedVersion)
 	raw = appendUint32(raw, item.PayloadOffset)
 	return appendUint32(raw, item.PayloadSize)
 }

@@ -10,6 +10,7 @@ func EncodeSetRequest(request SetRequest) []byte {
 	raw = appendInt64(raw, request.TTLMillis)
 	raw = appendUint64(raw, request.NamespaceVersion)
 	raw = appendUint64(raw, request.SpaceVersion)
+	raw = appendUint64(raw, request.ExpectedVersion)
 	return raw
 }
 
@@ -34,6 +35,10 @@ func DecodeSetRequest(raw []byte) (SetRequest, error) {
 	if err != nil {
 		return SetRequest{}, err
 	}
+	expectedVersion, err := cursor.readUint64()
+	if err != nil {
+		return SetRequest{}, err
+	}
 	if err := cursor.ensureEOF(); err != nil {
 		return SetRequest{}, err
 	}
@@ -42,6 +47,7 @@ func DecodeSetRequest(raw []byte) (SetRequest, error) {
 		TTLMillis:        ttlMillis,
 		NamespaceVersion: namespaceVersion,
 		SpaceVersion:     spaceVersion,
+		ExpectedVersion:  expectedVersion,
 	}, nil
 }
 
@@ -63,7 +69,9 @@ func DecodeGetRequest(raw []byte) (GetRequest, error) {
 
 func EncodeDeleteRequest(request DeleteRequest) []byte {
 	raw := newMetadata()
-	return appendKey(raw, request.Key)
+	raw = appendKey(raw, request.Key)
+	raw = appendUint64(raw, request.ExpectedVersion)
+	return raw
 }
 
 func DecodeDeleteRequest(raw []byte) (DeleteRequest, error) {
@@ -75,10 +83,14 @@ func DecodeDeleteRequest(raw []byte) (DeleteRequest, error) {
 	if err != nil {
 		return DeleteRequest{}, err
 	}
+	expectedVersion, err := cursor.readUint64()
+	if err != nil {
+		return DeleteRequest{}, err
+	}
 	if err := cursor.ensureEOF(); err != nil {
 		return DeleteRequest{}, err
 	}
-	return DeleteRequest{Key: key}, nil
+	return DeleteRequest{Key: key, ExpectedVersion: expectedVersion}, nil
 }
 
 func EncodeExistsRequest(request ExistsRequest) []byte {
@@ -103,6 +115,7 @@ func EncodeTouchRequest(request TouchRequest) []byte {
 	raw = appendInt64(raw, request.TTLMillis)
 	raw = appendUint64(raw, request.NamespaceVersion)
 	raw = appendUint64(raw, request.SpaceVersion)
+	raw = appendUint64(raw, request.ExpectedVersion)
 	return raw
 }
 
@@ -127,6 +140,10 @@ func DecodeTouchRequest(raw []byte) (TouchRequest, error) {
 	if err != nil {
 		return TouchRequest{}, err
 	}
+	expectedVersion, err := cursor.readUint64()
+	if err != nil {
+		return TouchRequest{}, err
+	}
 	if err := cursor.ensureEOF(); err != nil {
 		return TouchRequest{}, err
 	}
@@ -135,6 +152,7 @@ func DecodeTouchRequest(raw []byte) (TouchRequest, error) {
 		TTLMillis:        ttlMillis,
 		NamespaceVersion: namespaceVersion,
 		SpaceVersion:     spaceVersion,
+		ExpectedVersion:  expectedVersion,
 	}, nil
 }
 

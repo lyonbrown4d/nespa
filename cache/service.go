@@ -44,6 +44,7 @@ type SetOptions struct {
 	TTL              time.Duration
 	NamespaceVersion uint64
 	SpaceVersion     uint64
+	ExpectedVersion  uint64
 }
 
 type GetOptions struct {
@@ -55,15 +56,20 @@ type TouchOptions struct {
 	TTL              time.Duration
 	NamespaceVersion uint64
 	SpaceVersion     uint64
+	ExpectedVersion  uint64
+}
+
+type DeleteOptions struct {
+	ExpectedVersion uint64
 }
 
 type Service interface {
-	Set(context.Context, Key, []byte, SetOptions) (Record, error)
+	Set(context.Context, Key, []byte, SetOptions) (SetResult, error)
 	Get(context.Context, Key, GetOptions) (Record, bool, error)
-	Delete(context.Context, Key) (bool, error)
+	Delete(context.Context, Key, DeleteOptions) (bool, bool, error)
 	Exists(context.Context, Key, GetOptions) (bool, error)
 	Touch(context.Context, Key, TouchOptions) (bool, error)
-	BatchSet(context.Context, []SetRequest) ([]Record, error)
+	BatchSet(context.Context, []SetRequest) ([]SetResult, error)
 	BatchGet(context.Context, []GetRequest) ([]GetResult, error)
 	Stats(context.Context) (Stats, error)
 	Evict(context.Context, EvictRequest) (EvictResult, error)
@@ -73,6 +79,11 @@ type SetRequest struct {
 	Key     Key
 	Value   []byte
 	Options SetOptions
+}
+
+type SetResult struct {
+	Record Record
+	Found  bool
 }
 
 type GetRequest struct {
@@ -114,23 +125,24 @@ func NewService(eng engine.Engine, opts ...Option) *EngineService {
 	return svc
 }
 
-func (s *EngineService) Set(ctx context.Context, key Key, value []byte, opts SetOptions) (Record, error) {
+func (s *EngineService) Set(ctx context.Context, key Key, value []byte, opts SetOptions) (SetResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if err := s.admitSet(ctx, key, value); err != nil {
-		return Record{}, err
+		return SetResult{}, err
 	}
 
-	record, err := s.engine.Set(ctx, key, value, engine.SetOptions{
+	record, applied, err := s.engine.Set(ctx, key, value, engine.SetOptions{
 		TTL:              opts.TTL,
 		NamespaceVersion: opts.NamespaceVersion,
 		SpaceVersion:     opts.SpaceVersion,
+		ExpectedVersion:  opts.ExpectedVersion,
 	})
 	if err != nil {
-		return Record{}, fmt.Errorf("set engine record: %w", err)
+		return SetResult{}, fmt.Errorf("set engine record: %w", err)
 	}
-	return record, nil
+	return SetResult{Record: record, Found: applied}, nil
 }
 
 func (s *EngineService) Get(ctx context.Context, key Key, opts GetOptions) (Record, bool, error) {
@@ -144,15 +156,17 @@ func (s *EngineService) Get(ctx context.Context, key Key, opts GetOptions) (Reco
 	return record, found, nil
 }
 
-func (s *EngineService) Delete(ctx context.Context, key Key) (bool, error) {
+func (s *EngineService) Delete(ctx context.Context, key Key, options DeleteOptions) (bool, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	deleted, err := s.engine.Delete(ctx, key)
+	deleted, applied, err := s.engine.Delete(ctx, key, engine.DeleteOptions{
+		ExpectedVersion: options.ExpectedVersion,
+	})
 	if err != nil {
-		return false, fmt.Errorf("delete engine record: %w", err)
+		return false, false, fmt.Errorf("delete engine record: %w", err)
 	}
-	return deleted, nil
+	return deleted, applied, nil
 }
 
 func (s *EngineService) Exists(ctx context.Context, key Key, opts GetOptions) (bool, error) {
@@ -171,6 +185,7 @@ func (s *EngineService) Touch(ctx context.Context, key Key, opts TouchOptions) (
 		TTL:              opts.TTL,
 		NamespaceVersion: opts.NamespaceVersion,
 		SpaceVersion:     opts.SpaceVersion,
+		ExpectedVersion:  opts.ExpectedVersion,
 	})
 	if err != nil {
 		return false, fmt.Errorf("touch engine record: %w", err)
@@ -178,24 +193,25 @@ func (s *EngineService) Touch(ctx context.Context, key Key, opts TouchOptions) (
 	return touched, nil
 }
 
-func (s *EngineService) BatchSet(ctx context.Context, requests []SetRequest) ([]Record, error) {
+func (s *EngineService) BatchSet(ctx context.Context, requests []SetRequest) ([]SetResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	records := make([]Record, 0, len(requests))
+	records := make([]SetResult, 0, len(requests))
 	for _, request := range requests {
 		if err := s.admitSet(ctx, request.Key, request.Value); err != nil {
 			return records, err
 		}
-		record, err := s.engine.Set(ctx, request.Key, request.Value, engine.SetOptions{
+		record, applied, err := s.engine.Set(ctx, request.Key, request.Value, engine.SetOptions{
 			TTL:              request.Options.TTL,
 			NamespaceVersion: request.Options.NamespaceVersion,
 			SpaceVersion:     request.Options.SpaceVersion,
+			ExpectedVersion:  request.Options.ExpectedVersion,
 		})
 		if err != nil {
 			return records, fmt.Errorf("set engine batch record: %w", err)
 		}
-		records = append(records, record)
+		records = append(records, SetResult{Record: record, Found: applied})
 	}
 	return records, nil
 }

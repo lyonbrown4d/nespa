@@ -168,15 +168,16 @@ func (s *Server) handleSet(ctx context.Context, frame protocol.Frame) protocol.F
 		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
 	value := frame.Payload
-	rec, err := s.service.Set(ctx, keyFromWire(request.Key), value, cache.SetOptions{
+	result, err := s.service.Set(ctx, keyFromWire(request.Key), value, cache.SetOptions{
 		TTL:              ttlFromMillis(request.TTLMillis),
 		NamespaceVersion: request.NamespaceVersion,
 		SpaceVersion:     request.SpaceVersion,
+		ExpectedVersion:  request.ExpectedVersion,
 	})
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
-	return recordFrame(frame, rec, true)
+	return recordFrame(frame, result.Record, result.Found)
 }
 
 func (s *Server) handleGet(ctx context.Context, frame protocol.Frame) protocol.Frame {
@@ -199,11 +200,13 @@ func (s *Server) handleDelete(ctx context.Context, frame protocol.Frame) protoco
 	if err != nil {
 		return errorFrame(frame, protocol.ErrorBadFrame, err)
 	}
-	deleted, err := s.service.Delete(ctx, keyFromWire(request.Key))
+	deleted, applied, err := s.service.Delete(ctx, keyFromWire(request.Key), cache.DeleteOptions{
+		ExpectedVersion: request.ExpectedVersion,
+	})
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
-	return metadataFrame(frame, cachewire.EncodeDeleteResponse(cachewire.DeleteResponse{Deleted: deleted}), nil)
+	return metadataFrame(frame, cachewire.EncodeDeleteResponse(cachewire.DeleteResponse{Deleted: deleted && applied}), nil)
 }
 
 func (s *Server) handleExists(ctx context.Context, frame protocol.Frame) protocol.Frame {
@@ -239,7 +242,7 @@ func (s *Server) handleBatchSet(ctx context.Context, frame protocol.Frame) proto
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
-	return metadataFrame(frame, cachewire.EncodeBatchSetResponse(cachewire.BatchSetResponse{Records: recordsFromCache(records)}), nil)
+	return metadataFrame(frame, cachewire.EncodeBatchSetResponse(cachewire.BatchSetResponse{Records: recordsFromSetResults(records)}), nil)
 }
 
 func (s *Server) handleBatchGet(ctx context.Context, frame protocol.Frame) protocol.Frame {

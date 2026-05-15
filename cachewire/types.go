@@ -25,6 +25,7 @@ type SetRequest struct {
 	TTLMillis        int64  `json:"ttl_ms,omitempty"`
 	NamespaceVersion uint64 `json:"namespace_version,omitempty"`
 	SpaceVersion     uint64 `json:"space_version,omitempty"`
+	ExpectedVersion  uint64 `json:"expected_version,omitempty"`
 	PayloadOffset    uint32 `json:"payload_offset,omitempty"`
 	PayloadSize      uint32 `json:"payload_size,omitempty"`
 }
@@ -38,7 +39,8 @@ type GetRequest struct {
 
 type DeleteRequest struct {
 	Key
-	RouteEpoch uint64 `json:"-"`
+	RouteEpoch      uint64 `json:"-"`
+	ExpectedVersion uint64 `json:"expected_version,omitempty"`
 }
 
 type ExistsRequest struct {
@@ -54,6 +56,7 @@ type TouchRequest struct {
 	TTLMillis        int64  `json:"ttl_ms"`
 	NamespaceVersion uint64 `json:"namespace_version,omitempty"`
 	SpaceVersion     uint64 `json:"space_version,omitempty"`
+	ExpectedVersion  uint64 `json:"expected_version,omitempty"`
 }
 
 type BatchSetRequest struct {

@@ -59,6 +59,16 @@ func (s *shardWorker) statsResult() shardResult {
 }
 
 func (s *shardWorker) applySet(cmd shardCommand) shardResult {
+	if cmd.setOpts.ExpectedVersion > 0 {
+		if existing, ok := s.entries[cmd.physical]; ok {
+			if existing.version != cmd.setOpts.ExpectedVersion {
+				return shardResult{found: false}
+			}
+		} else {
+			return shardResult{found: false}
+		}
+	}
+
 	var expireAt time.Time
 	if cmd.setOpts.TTL > 0 {
 		expireAt = cmd.now.Add(cmd.setOpts.TTL)
@@ -67,7 +77,7 @@ func (s *shardWorker) applySet(cmd shardCommand) shardResult {
 	cost := costOf(cmd.key, cmd.value)
 	if existing, ok := s.entries[cmd.physical]; ok {
 		s.replaceEntry(existing, cmd, expireAt, cost)
-		return shardResult{record: existing.record()}
+		return shardResult{record: existing.record(), found: true}
 	}
 
 	ent := newEntry(cmd, expireAt, cost)
@@ -75,7 +85,7 @@ func (s *shardWorker) applySet(cmd shardCommand) shardResult {
 	s.objects++
 	s.memoryBytes += cost
 	s.addSpaceUsage(spaceKeyOf(cmd.key), 1, cost)
-	return shardResult{record: ent.record()}
+	return shardResult{record: ent.record(), found: true}
 }
 
 func (s *shardWorker) replaceEntry(existing *entry, cmd shardCommand, expireAt time.Time, cost uint64) {
@@ -127,8 +137,11 @@ func (s *shardWorker) applyDelete(cmd shardCommand) shardResult {
 	if !ok {
 		return shardResult{}
 	}
+	if cmd.deleteOpts.ExpectedVersion > 0 && ent.version != cmd.deleteOpts.ExpectedVersion {
+		return shardResult{found: false}
+	}
 	s.deleteEntry(cmd.physical, ent)
-	return shardResult{deleted: true}
+	return shardResult{deleted: true, found: true}
 }
 
 func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
@@ -144,6 +157,10 @@ func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
 	}
 	if ent.expired(cmd.now) {
 		s.deleteEntry(cmd.physical, ent)
+		s.touchMisses++
+		return shardResult{}
+	}
+	if cmd.touch.ExpectedVersion > 0 && ent.version != cmd.touch.ExpectedVersion {
 		s.touchMisses++
 		return shardResult{}
 	}

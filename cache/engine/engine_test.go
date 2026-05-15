@@ -14,7 +14,7 @@ func TestMemoryEngineSetGetCopiesValue(t *testing.T) {
 	key := engine.Key{Namespace: "order", Space: "session", Key: "k1"}
 	value := []byte("first")
 
-	rec, err := eng.Set(context.Background(), key, value, engine.SetOptions{})
+	rec, _, err := eng.Set(context.Background(), key, value, engine.SetOptions{})
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -51,10 +51,10 @@ func TestMemoryEnginePhysicalKeyEncodingAvoidsDelimiterCollision(t *testing.T) {
 	left := engine.Key{Namespace: "a", Space: "b\x00c", Key: "d"}
 	right := engine.Key{Namespace: "a", Space: "b", Entity: "c\x00", Key: "d"}
 
-	if _, err := eng.Set(context.Background(), left, []byte("left"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), left, []byte("left"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set left: %v", err)
 	}
-	if _, err := eng.Set(context.Background(), right, []byte("right"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), right, []byte("right"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set right: %v", err)
 	}
 
@@ -74,7 +74,7 @@ func TestMemoryEngineTTL(t *testing.T) {
 	defer closeEngine(t, eng)
 
 	key := engine.Key{Namespace: "order", Space: "session", Key: "k1"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{TTL: time.Second}); err != nil {
+	if _, _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{TTL: time.Second}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestMemoryEngineVersionVisibility(t *testing.T) {
 	eng := engine.NewMemory(engine.Config{})
 	defer closeEngine(t, eng)
 	key := engine.Key{Namespace: "order", Space: "view", Key: "k1"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{
+	if _, _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{
 		NamespaceVersion: 2,
 		SpaceVersion:     5,
 	}); err != nil {
@@ -118,18 +118,97 @@ func TestMemoryEngineVersionVisibility(t *testing.T) {
 	}
 }
 
+func TestMemoryEngineSetRejectsMismatchedExpectedVersion(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{})
+	defer closeEngine(t, eng)
+
+	key := engine.Key{Namespace: "order", Space: "session", Key: "k1"}
+	record, _, err := eng.Set(context.Background(), key, []byte("initial"), engine.SetOptions{})
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	_, found, err := eng.Set(context.Background(), key, []byte("updated"), engine.SetOptions{
+		ExpectedVersion: record.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("set with mismatched expected version: %v", err)
+	}
+	if found {
+		t.Fatal("set with mismatched expected version should not match")
+	}
+
+	got, ok, err := eng.Get(context.Background(), key, engine.GetOptions{})
+	if err != nil || !ok {
+		t.Fatalf("get existing record: ok=%v err=%v", ok, err)
+	}
+	if string(got.Value) != "initial" {
+		t.Fatalf("unexpected value = %q, want initial", got.Value)
+	}
+}
+
+func TestMemoryEngineDeleteRejectsMismatchedExpectedVersion(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{})
+	defer closeEngine(t, eng)
+
+	key := engine.Key{Namespace: "order", Space: "session", Key: "k1"}
+	record, _, err := eng.Set(context.Background(), key, []byte("initial"), engine.SetOptions{})
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	deleted, applied, err := eng.Delete(context.Background(), key, engine.DeleteOptions{
+		ExpectedVersion: record.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("delete with mismatched expected version: %v", err)
+	}
+	if deleted {
+		t.Fatal("delete should report missing when expected version mismatched")
+	}
+	if applied {
+		t.Fatal("delete with mismatched expected version should not apply")
+	}
+
+	_, ok, err := eng.Get(context.Background(), key, engine.GetOptions{})
+	if err != nil || !ok {
+		t.Fatalf("record should still exist: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestMemoryEngineTouchRejectsMismatchedExpectedVersion(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{})
+	defer closeEngine(t, eng)
+
+	key := engine.Key{Namespace: "order", Space: "session", Key: "k1"}
+	record, _, err := eng.Set(context.Background(), key, []byte("initial"), engine.SetOptions{})
+	if err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+
+	touched, err := eng.Touch(context.Background(), key, engine.TouchOptions{
+		ExpectedVersion: record.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("touch with mismatched expected version: %v", err)
+	}
+	if touched {
+		t.Fatal("touch should not hit when expected version mismatched")
+	}
+}
+
 func TestMemoryEngineDeleteAndStats(t *testing.T) {
 	eng := engine.NewMemory(engine.Config{ShardCount: 4})
 	defer closeEngine(t, eng)
 	key := engine.Key{Namespace: "order", Space: "session", Key: "k1"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	if stats, err := eng.Stats(context.Background()); err != nil || stats.Objects != 1 || stats.MemoryBytes == 0 {
 		t.Fatalf("stats after set = %+v", stats)
 	}
 
-	deleted, err := eng.Delete(context.Background(), key)
+	deleted, _, err := eng.Delete(context.Background(), key, engine.DeleteOptions{})
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -148,10 +227,10 @@ func TestMemoryEngineStatsIncludesSpaceUsage(t *testing.T) {
 	keyA := engine.Key{Namespace: "order", Space: "session", Key: "a"}
 	keyB := engine.Key{Namespace: "order", Space: "view", Key: "b"}
 
-	if _, err := eng.Set(context.Background(), keyA, []byte("one"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), keyA, []byte("one"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set a: %v", err)
 	}
-	if _, err := eng.Set(context.Background(), keyB, []byte("two"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), keyB, []byte("two"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set b: %v", err)
 	}
 
@@ -175,14 +254,14 @@ func TestMemoryEngineEvictsScopedLRU(t *testing.T) {
 	newKey := engine.Key{Namespace: "n", Space: "s", Key: "new"}
 	otherKey := engine.Key{Namespace: "n", Space: "other", Key: "other"}
 
-	if _, err := eng.Set(context.Background(), oldKey, []byte("old-value"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), oldKey, []byte("old-value"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set old: %v", err)
 	}
 	now = now.Add(time.Second)
-	if _, err := eng.Set(context.Background(), newKey, []byte("new-value"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), newKey, []byte("new-value"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set new: %v", err)
 	}
-	if _, err := eng.Set(context.Background(), otherKey, []byte("other-value"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), otherKey, []byte("other-value"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set other: %v", err)
 	}
 
@@ -210,10 +289,10 @@ func TestMemoryEngineStatsTrackGetAndTouchOutcomes(t *testing.T) {
 	keyHit := engine.Key{Namespace: "stats", Space: "cache", Key: "hit"}
 	keyTouch := engine.Key{Namespace: "stats", Space: "cache", Key: "touch"}
 
-	if _, err := eng.Set(context.Background(), keyHit, []byte("value"), engine.SetOptions{TTL: time.Second}); err != nil {
+	if _, _, err := eng.Set(context.Background(), keyHit, []byte("value"), engine.SetOptions{TTL: time.Second}); err != nil {
 		t.Fatalf("set hit key: %v", err)
 	}
-	if _, err := eng.Set(context.Background(), keyTouch, []byte("touch"), engine.SetOptions{TTL: 5 * time.Second}); err != nil {
+	if _, _, err := eng.Set(context.Background(), keyTouch, []byte("touch"), engine.SetOptions{TTL: 5 * time.Second}); err != nil {
 		t.Fatalf("set touch key: %v", err)
 	}
 
@@ -277,10 +356,10 @@ func TestMemoryEngineDistinguishesEntitiesInPhysicalKeys(t *testing.T) {
 	keyA := engine.Key{Namespace: "ns", Space: "sp", Entity: "OrderView", Key: "k"}
 	keyB := engine.Key{Namespace: "ns", Space: "sp", Entity: "SessionView", Key: "k"}
 
-	if _, err := eng.Set(context.Background(), keyA, []byte("order"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), keyA, []byte("order"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set entity A: %v", err)
 	}
-	if _, err := eng.Set(context.Background(), keyB, []byte("session"), engine.SetOptions{}); err != nil {
+	if _, _, err := eng.Set(context.Background(), keyB, []byte("session"), engine.SetOptions{}); err != nil {
 		t.Fatalf("set entity B: %v", err)
 	}
 

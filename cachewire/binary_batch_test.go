@@ -13,8 +13,8 @@ func TestBinaryBatchSetRequestRoundTrip(t *testing.T) {
 	request := cachewire.BatchSetRequest{
 		RouteEpoch: 7,
 		Items: []cachewire.SetRequest{
-			{Key: cachewire.Key{Namespace: "orders", Space: "session", Key: "a"}, Value: []byte("alpha"), TTLMillis: 100, NamespaceVersion: 2, SpaceVersion: 3},
-			{Key: cachewire.Key{Namespace: "orders", Space: "session", Key: "b"}, Value: []byte("beta"), TTLMillis: 200, NamespaceVersion: 2, SpaceVersion: 3},
+			{Key: cachewire.Key{Namespace: "orders", Space: "session", Key: "a"}, Value: []byte("alpha"), TTLMillis: 100, NamespaceVersion: 2, SpaceVersion: 3, ExpectedVersion: 9},
+			{Key: cachewire.Key{Namespace: "orders", Space: "session", Key: "b"}, Value: []byte("beta"), TTLMillis: 200, NamespaceVersion: 2, SpaceVersion: 3, ExpectedVersion: 10},
 		},
 	}
 
@@ -111,7 +111,7 @@ func requireSetItems(t *testing.T, got, want []cachewire.SetRequest) {
 		if got[index].Key != want[index].Key || !bytes.Equal(got[index].Value, want[index].Value) {
 			t.Fatalf("item[%d] = %+v, want %+v", index, got[index], want[index])
 		}
-		if got[index].TTLMillis != want[index].TTLMillis || got[index].NamespaceVersion != want[index].NamespaceVersion || got[index].SpaceVersion != want[index].SpaceVersion {
+		if got[index].TTLMillis != want[index].TTLMillis || got[index].NamespaceVersion != want[index].NamespaceVersion || got[index].SpaceVersion != want[index].SpaceVersion || got[index].ExpectedVersion != want[index].ExpectedVersion {
 			t.Fatalf("item[%d] metadata = %+v, want %+v", index, got[index], want[index])
 		}
 	}

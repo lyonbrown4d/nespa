@@ -44,9 +44,9 @@ func NewMemory(cfg Config) *MemoryEngine {
 	return eng
 }
 
-func (e *MemoryEngine) Set(ctx context.Context, key Key, value []byte, opts SetOptions) (Record, error) {
+func (e *MemoryEngine) Set(ctx context.Context, key Key, value []byte, opts SetOptions) (Record, bool, error) {
 	if err := validateKey(key); err != nil {
-		return Record{}, err
+		return Record{}, false, err
 	}
 
 	result, err := e.execute(ctx, shardCommand{
@@ -59,9 +59,9 @@ func (e *MemoryEngine) Set(ctx context.Context, key Key, value []byte, opts SetO
 		reply:    make(chan shardResult, 1),
 	})
 	if err != nil {
-		return Record{}, err
+		return Record{}, false, err
 	}
-	return result.record, result.err
+	return result.record, result.found, result.err
 }
 
 func (e *MemoryEngine) Get(ctx context.Context, key Key, opts GetOptions) (Record, bool, error) {
@@ -82,20 +82,21 @@ func (e *MemoryEngine) Get(ctx context.Context, key Key, opts GetOptions) (Recor
 	return result.record, result.found, result.err
 }
 
-func (e *MemoryEngine) Delete(ctx context.Context, key Key) (bool, error) {
+func (e *MemoryEngine) Delete(ctx context.Context, key Key, opts DeleteOptions) (bool, bool, error) {
 	if err := validateKey(key); err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	result, err := e.execute(ctx, shardCommand{
-		kind:     commandDelete,
-		physical: physicalKey(key),
-		reply:    make(chan shardResult, 1),
+		kind:       commandDelete,
+		physical:   physicalKey(key),
+		deleteOpts: opts,
+		reply:      make(chan shardResult, 1),
 	})
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	return result.deleted, result.err
+	return result.deleted, result.found, result.err
 }
 
 func (e *MemoryEngine) Exists(ctx context.Context, key Key, opts GetOptions) (bool, error) {

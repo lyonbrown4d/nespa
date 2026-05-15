@@ -14,7 +14,7 @@ func TestMemoryEngineTouchRejectsMismatchedVersion(t *testing.T) {
 	defer closeEngine(t, eng)
 
 	key := engine.Key{Namespace: "order", Space: "view", Key: "k1"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{
+	if _, _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{
 		TTL:              time.Second,
 		NamespaceVersion: 1,
 		SpaceVersion:     1,
@@ -48,7 +48,7 @@ func TestMemoryEngineTouchExtendsMatchingVersion(t *testing.T) {
 	defer closeEngine(t, eng)
 
 	key := engine.Key{Namespace: "order", Space: "view", Key: "k1"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{
+	if _, _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{
 		TTL:              time.Second,
 		NamespaceVersion: 1,
 		SpaceVersion:     1,
@@ -81,7 +81,7 @@ func TestMemoryEngineTouchRejectsNegativeTTL(t *testing.T) {
 	defer closeEngine(t, eng)
 
 	key := engine.Key{Namespace: "order", Space: "view", Key: "k2"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{TTL: time.Second}); err != nil {
+	if _, _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{TTL: time.Second}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestMemoryEngineTouchZeroTTLRemovesExpiration(t *testing.T) {
 	defer closeEngine(t, eng)
 
 	key := engine.Key{Namespace: "order", Space: "view", Key: "k3"}
-	if _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{TTL: time.Second}); err != nil {
+	if _, _, err := eng.Set(context.Background(), key, []byte("value"), engine.SetOptions{TTL: time.Second}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
