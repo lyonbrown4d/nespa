@@ -15,6 +15,9 @@ type SummaryBody struct {
 	Namespaces         uint64 `json:"namespaces"`
 	Spaces             uint64 `json:"spaces"`
 	Nodes              uint64 `json:"nodes"`
+	ControlRevision    uint64 `json:"control_revision"`
+	RouteCount         uint64 `json:"route_count"`
+	NodeRouteEpoch     uint64 `json:"node_route_epoch"`
 	CacheMemory        uint64 `json:"cache_memory_bytes"`
 	CacheObjects       uint64 `json:"cache_objects"`
 	CacheGetRequests   uint64 `json:"cache_get_requests"`

@@ -22,11 +22,23 @@ type fakeSummaryControlService struct {
 	namespaces controlapi.NamespacesBody
 	spaces     controlapi.SpacesBody
 	nodes      controlapi.NodesBody
+	revision   uint64
+	routeCount uint64
 }
 
 func (f fakeSummaryControlService) Namespaces() controlapi.NamespacesBody { return f.namespaces }
 func (f fakeSummaryControlService) Spaces() controlapi.SpacesBody         { return f.spaces }
 func (f fakeSummaryControlService) Nodes() controlapi.NodesBody           { return f.nodes }
+func (f fakeSummaryControlService) Revision() uint64                      { return f.revision }
+func (f fakeSummaryControlService) RouteCount() uint64                    { return f.routeCount }
+
+type fakeSummaryNodeService struct {
+	routeEpoch uint64
+}
+
+func (f fakeSummaryNodeService) RouteEpoch() uint64 {
+	return f.routeEpoch
+}
 
 func TestSummaryReturnsRuntimeStats(t *testing.T) {
 	cachedSvc := fakeSummaryCacheService{
@@ -54,12 +66,18 @@ func TestSummaryReturnsRuntimeStats(t *testing.T) {
 		nodes: controlapi.NodesBody{
 			Nodes: []controlapi.NodeBody{{NodeID: "node-1"}, {NodeID: "node-2"}},
 		},
+		revision:   42,
+		routeCount: 2,
+	}
+	nodeSvc := fakeSummaryNodeService{
+		routeEpoch: 7,
 	}
 
 	endpoint := &summaryEndpoint{
 		cfg:        Config{ControlAddr: "127.0.0.1:7401"},
 		cacheSvc:   cachedSvc,
 		controlSvc: controlSvc,
+		nodeSvc:    nodeSvc,
 	}
 
 	got, err := endpoint.Summary(context.Background(), &runtime.EmptyInput{})
@@ -76,6 +94,15 @@ func TestSummaryReturnsRuntimeStats(t *testing.T) {
 	}
 	if body.Namespaces != 2 || body.Spaces != 2 || body.Nodes != 2 {
 		t.Fatalf("counts = %+v", body)
+	}
+	if body.ControlRevision != 42 {
+		t.Fatalf("control_revision = %d, want 42", body.ControlRevision)
+	}
+	if body.RouteCount != 2 {
+		t.Fatalf("route_count = %d, want 2", body.RouteCount)
+	}
+	if body.NodeRouteEpoch != 7 {
+		t.Fatalf("node_route_epoch = %d, want 7", body.NodeRouteEpoch)
 	}
 	if body.CacheObjects != 3 || body.CacheMemory != 128 {
 		t.Fatalf("cache stats = %+v", body)

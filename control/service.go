@@ -59,6 +59,14 @@ func (s *ServiceRuntime) Nodes() controlapi.NodesBody {
 	return s.state.Nodes()
 }
 
+func (s *ServiceRuntime) Revision() uint64 {
+	return s.state.Revision()
+}
+
+func (s *ServiceRuntime) RouteCount() uint64 {
+	return uint64(s.state.RouteCount())
+}
+
 func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
 	cfg := svc.cfg
 	return runtime.HTTPConfig{

@@ -164,6 +164,15 @@ Write-Host "build server and client"
             if ([int]$adminSummary.nodes -lt 1) {
                 throw "admin summary nodes expected >= 1, got $($adminSummary.nodes)"
             }
+            if ([int]$adminSummary.control_revision -lt 1) {
+                throw "admin summary control_revision expected >= 1, got $($adminSummary.control_revision)"
+            }
+            if ([int]$adminSummary.route_count -lt 1) {
+                throw "admin summary route_count expected >= 1, got $($adminSummary.route_count)"
+            }
+            if ($adminSummary.node_route_epoch -is [long] -and $adminSummary.node_route_epoch -lt 0) {
+                throw "admin summary node_route_epoch expected >= 0, got $($adminSummary.node_route_epoch)"
+            }
             if ([int]$adminSummary.cache_objects -lt 1) {
                 throw "admin summary cache_objects expected >= 1, got $($adminSummary.cache_objects)"
             }

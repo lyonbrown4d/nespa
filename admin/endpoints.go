@@ -23,19 +23,27 @@ type summaryControlProvider interface {
 	Namespaces() controlapi.NamespacesBody
 	Spaces() controlapi.SpacesBody
 	Nodes() controlapi.NodesBody
+	Revision() uint64
+	RouteCount() uint64
+}
+
+type summaryNodeProvider interface {
+	RouteEpoch() uint64
 }
 
 type summaryEndpoint struct {
 	cfg        Config
 	cacheSvc   summaryCacheProvider
 	controlSvc summaryControlProvider
+	nodeSvc    summaryNodeProvider
 }
 
-func NewSummaryEndpoint(cfg Config, cacheSvc summaryCacheProvider, controlSvc summaryControlProvider) Endpoint {
+func NewSummaryEndpoint(cfg Config, cacheSvc summaryCacheProvider, controlSvc summaryControlProvider, nodeSvc summaryNodeProvider) Endpoint {
 	return &summaryEndpoint{
 		cfg:        cfg,
 		cacheSvc:   cacheSvc,
 		controlSvc: controlSvc,
+		nodeSvc:    nodeSvc,
 	}
 }
 
@@ -60,12 +68,19 @@ func (e *summaryEndpoint) Summary(ctx context.Context, _ *runtime.EmptyInput) (*
 	namespaces := e.controlSvc.Namespaces()
 	spaces := e.controlSvc.Spaces()
 	nodes := e.controlSvc.Nodes()
+	nodeRouteEpoch := uint64(0)
+	if e.nodeSvc != nil {
+		nodeRouteEpoch = e.nodeSvc.RouteEpoch()
+	}
 
 	return runtime.JSON(SummaryBody{
 		ControlAddr:        e.cfg.ControlAddr,
 		Namespaces:         uint64(len(namespaces.Namespaces)),
 		Spaces:             uint64(len(spaces.Spaces)),
 		Nodes:              uint64(len(nodes.Nodes)),
+		ControlRevision:    e.controlSvc.Revision(),
+		RouteCount:         e.controlSvc.RouteCount(),
+		NodeRouteEpoch:     nodeRouteEpoch,
 		CacheMemory:        stats.MemoryBytes,
 		CacheObjects:       stats.Objects,
 		CacheGetRequests:   stats.GetRequests,

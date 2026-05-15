@@ -170,6 +170,22 @@ func (s *ControlState) Nodes() controlapi.NodesBody {
 	}
 }
 
+func (s *ControlState) Revision() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.revision
+}
+
+func (s *ControlState) RouteCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	nodes := s.sortedNodesLocked()
+	spaces := s.sortedSpacesLocked()
+	return len(routesForNodes(nodes, spaces))
+}
+
 func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
