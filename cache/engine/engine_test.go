@@ -270,6 +270,47 @@ func TestMemoryEngineStatsTrackGetAndTouchOutcomes(t *testing.T) {
 	}
 }
 
+func TestMemoryEngineDistinguishesEntitiesInPhysicalKeys(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 1})
+	defer closeEngine(t, eng)
+
+	keyA := engine.Key{Namespace: "ns", Space: "sp", Entity: "OrderView", Key: "k"}
+	keyB := engine.Key{Namespace: "ns", Space: "sp", Entity: "SessionView", Key: "k"}
+
+	if _, err := eng.Set(context.Background(), keyA, []byte("order"), engine.SetOptions{}); err != nil {
+		t.Fatalf("set entity A: %v", err)
+	}
+	if _, err := eng.Set(context.Background(), keyB, []byte("session"), engine.SetOptions{}); err != nil {
+		t.Fatalf("set entity B: %v", err)
+	}
+
+	recordA, ok, err := eng.Get(context.Background(), keyA, engine.GetOptions{})
+	if err != nil || !ok {
+		t.Fatalf("get entity A: ok=%v err=%v", ok, err)
+	}
+	if string(recordA.Value) != "order" {
+		t.Fatalf("entity A value = %q, want %q", string(recordA.Value), "order")
+	}
+
+	recordB, ok, err := eng.Get(context.Background(), keyB, engine.GetOptions{})
+	if err != nil || !ok {
+		t.Fatalf("get entity B: ok=%v err=%v", ok, err)
+	}
+	if string(recordB.Value) != "session" {
+		t.Fatalf("entity B value = %q, want %q", string(recordB.Value), "session")
+	}
+
+	missingKey := keyA
+	missingKey.Entity = "InvoiceView"
+	_, ok, err = eng.Get(context.Background(), missingKey, engine.GetOptions{})
+	if err != nil {
+		t.Fatalf("get missing entity: %v", err)
+	}
+	if ok {
+		t.Fatal("missing entity should not be found")
+	}
+}
+
 func engineCostForTest(key engine.Key, value []byte) uint64 {
 	return engine.EstimateCost(key, value)
 }
