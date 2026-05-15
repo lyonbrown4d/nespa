@@ -16,7 +16,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$workDir = Join-Path $repoRoot ".codex\\smoke"
+$workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("nespa-smoke-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 
 $serverExe = Join-Path $workDir "nespa-smoke.exe"
