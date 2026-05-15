@@ -155,6 +155,21 @@ Write-Host "build server and client"
             if ($adminSummary.control_addr -ne $ControlAddr) {
                 throw "admin summary control_addr mismatch: $($adminSummary.control_addr) != $ControlAddr"
             }
+            if ([int]$adminSummary.namespaces -lt 1) {
+                throw "admin summary namespaces expected >= 1, got $($adminSummary.namespaces)"
+            }
+            if ([int]$adminSummary.spaces -lt 1) {
+                throw "admin summary spaces expected >= 1, got $($adminSummary.spaces)"
+            }
+            if ([int]$adminSummary.nodes -lt 1) {
+                throw "admin summary nodes expected >= 1, got $($adminSummary.nodes)"
+            }
+            if ([int]$adminSummary.cache_objects -lt 1) {
+                throw "admin summary cache_objects expected >= 1, got $($adminSummary.cache_objects)"
+            }
+            if ([int]$adminSummary.cache_get_requests -lt 1) {
+                throw "admin summary cache_get_requests expected >= 1, got $($adminSummary.cache_get_requests)"
+            }
         }
 
         Write-Host "smoke ok"
