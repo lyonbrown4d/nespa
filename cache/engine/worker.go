@@ -43,11 +43,18 @@ func (s *shardWorker) statsResult() shardResult {
 	spaces := make(map[spaceKey]spaceUsage, len(s.spaces))
 	maps.Copy(spaces, s.spaces)
 	return shardResult{stats: ShardStats{
-		ID:          s.id,
-		Objects:     s.objects,
-		MemoryBytes: s.memoryBytes,
-		Evictions:   s.evictions,
-		QueueDepth:  len(s.commands),
+		ID:            s.id,
+		Objects:       s.objects,
+		MemoryBytes:   s.memoryBytes,
+		Evictions:     s.evictions,
+		GetRequests:   s.gets,
+		GetHits:       s.getHits,
+		GetMisses:     s.getMisses,
+		GetExpired:    s.getExpired,
+		TouchRequests: s.touches,
+		TouchHits:     s.touchHits,
+		TouchMisses:   s.touchMisses,
+		QueueDepth:    len(s.commands),
 	}, spaces: spaces}
 }
 
@@ -93,19 +100,25 @@ func (s *shardWorker) replaceEntry(existing *entry, cmd shardCommand, expireAt t
 }
 
 func (s *shardWorker) applyGet(cmd shardCommand) shardResult {
+	s.gets++
 	ent, ok := s.entries[cmd.physical]
 	if !ok {
+		s.getMisses++
 		return shardResult{}
 	}
 	if ent.expired(cmd.now) {
 		s.deleteEntry(cmd.physical, ent)
+		s.getExpired++
+		s.getMisses++
 		return shardResult{}
 	}
 	if !ent.visible(cmd.getOpts) {
+		s.getMisses++
 		return shardResult{}
 	}
 	ent.lastAccessAt = cmd.now
 	ent.accessCount++
+	s.getHits++
 	return shardResult{record: ent.record(), found: true}
 }
 
@@ -119,18 +132,23 @@ func (s *shardWorker) applyDelete(cmd shardCommand) shardResult {
 }
 
 func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
+	s.touches++
 	ent, ok := s.entries[cmd.physical]
 	if !ok {
+		s.touchMisses++
 		return shardResult{}
 	}
 	if cmd.touch.TTL < 0 {
+		s.touchMisses++
 		return shardResult{}
 	}
 	if ent.expired(cmd.now) {
 		s.deleteEntry(cmd.physical, ent)
+		s.touchMisses++
 		return shardResult{}
 	}
 	if !ent.visible(GetOptions{NamespaceVersion: cmd.touch.NamespaceVersion, SpaceVersion: cmd.touch.SpaceVersion}) {
+		s.touchMisses++
 		return shardResult{}
 	}
 
@@ -142,6 +160,7 @@ func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
 	ent.updatedAt = cmd.now
 	ent.lastAccessAt = cmd.now
 	ent.accessCount++
+	s.touchHits++
 	return shardResult{touched: true}
 }
 

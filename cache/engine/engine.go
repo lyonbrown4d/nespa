@@ -76,19 +76,33 @@ type Record struct {
 }
 
 type Stats struct {
-	Objects     uint64
-	MemoryBytes uint64
-	Evictions   uint64
-	Shards      []ShardStats
-	Spaces      []SpaceStats
+	Objects       uint64
+	MemoryBytes   uint64
+	Evictions     uint64
+	GetRequests   uint64 `json:"get_requests"`
+	GetHits       uint64 `json:"get_hits"`
+	GetMisses     uint64 `json:"get_misses"`
+	GetExpired    uint64 `json:"get_expired"`
+	TouchRequests uint64 `json:"touch_requests"`
+	TouchHits     uint64 `json:"touch_hits"`
+	TouchMisses   uint64 `json:"touch_misses"`
+	Shards        []ShardStats
+	Spaces        []SpaceStats
 }
 
 type ShardStats struct {
-	ID          int    `json:"id"`
-	Objects     uint64 `json:"objects"`
-	MemoryBytes uint64 `json:"memory_bytes"`
-	Evictions   uint64 `json:"evictions"`
-	QueueDepth  int    `json:"queue_depth"`
+	ID            int    `json:"id"`
+	Objects       uint64 `json:"objects"`
+	MemoryBytes   uint64 `json:"memory_bytes"`
+	Evictions     uint64 `json:"evictions"`
+	GetRequests   uint64 `json:"get_requests"`
+	GetHits       uint64 `json:"get_hits"`
+	GetMisses     uint64 `json:"get_misses"`
+	GetExpired    uint64 `json:"get_expired"`
+	TouchRequests uint64 `json:"touch_requests"`
+	TouchHits     uint64 `json:"touch_hits"`
+	TouchMisses   uint64 `json:"touch_misses"`
+	QueueDepth    int    `json:"queue_depth"`
 }
 
 type SpaceStats struct {
@@ -128,6 +142,13 @@ type shardWorker struct {
 	objects     uint64
 	memoryBytes uint64
 	evictions   uint64
+	gets        uint64
+	getHits     uint64
+	getMisses   uint64
+	getExpired  uint64
+	touches     uint64
+	touchHits   uint64
+	touchMisses uint64
 }
 
 type spaceKey struct {

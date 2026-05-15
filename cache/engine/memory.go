@@ -253,6 +253,13 @@ func addShardStats(stats *Stats, shard ShardStats) {
 	stats.Objects += shard.Objects
 	stats.MemoryBytes += shard.MemoryBytes
 	stats.Evictions += shard.Evictions
+	stats.GetRequests += shard.GetRequests
+	stats.GetHits += shard.GetHits
+	stats.GetMisses += shard.GetMisses
+	stats.GetExpired += shard.GetExpired
+	stats.TouchRequests += shard.TouchRequests
+	stats.TouchHits += shard.TouchHits
+	stats.TouchMisses += shard.TouchMisses
 }
 
 func addSpaceStats(total, shard map[spaceKey]spaceUsage) {
