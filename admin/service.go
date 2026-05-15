@@ -11,10 +11,20 @@ type Config struct {
 }
 
 type SummaryBody struct {
-	ControlAddr string `json:"control_addr"`
-	Namespaces  uint64 `json:"namespaces"`
-	Spaces      uint64 `json:"spaces"`
-	Nodes       uint64 `json:"nodes"`
+	ControlAddr        string `json:"control_addr"`
+	Namespaces         uint64 `json:"namespaces"`
+	Spaces             uint64 `json:"spaces"`
+	Nodes              uint64 `json:"nodes"`
+	CacheMemory        uint64 `json:"cache_memory_bytes"`
+	CacheObjects       uint64 `json:"cache_objects"`
+	CacheGetRequests   uint64 `json:"cache_get_requests"`
+	CacheGetHits       uint64 `json:"cache_get_hits"`
+	CacheGetMisses     uint64 `json:"cache_get_misses"`
+	CacheGetExpired    uint64 `json:"cache_get_expired"`
+	CacheTouchRequests uint64 `json:"cache_touch_requests"`
+	CacheTouchHits     uint64 `json:"cache_touch_hits"`
+	CacheTouchMisses   uint64 `json:"cache_touch_misses"`
+	CacheEvictions     uint64 `json:"cache_evictions"`
 }
 
 func HTTPConfig(cfg Config) runtime.HTTPConfig {

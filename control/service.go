@@ -47,6 +47,18 @@ func NewServiceRuntime(cfg Config) *ServiceRuntime {
 	}
 }
 
+func (s *ServiceRuntime) Namespaces() controlapi.NamespacesBody {
+	return s.state.Namespaces()
+}
+
+func (s *ServiceRuntime) Spaces() controlapi.SpacesBody {
+	return s.state.Spaces()
+}
+
+func (s *ServiceRuntime) Nodes() controlapi.NodesBody {
+	return s.state.Nodes()
+}
+
 func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
 	cfg := svc.cfg
 	return runtime.HTTPConfig{

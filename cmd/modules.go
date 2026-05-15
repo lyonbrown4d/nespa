@@ -157,7 +157,12 @@ func nodeModule() dix.Module {
 func adminModule() dix.Module {
 	return dix.NewModule("admin",
 		dix.WithModuleProviders(
-			dix.Contribute1[admin.Endpoint, admin.Config](admin.NewSummaryEndpoint, dix.Order(10)),
+			dix.Contribute3[admin.Endpoint, admin.Config, cache.Service, *control.ServiceRuntime](
+				func(cfg admin.Config, cacheSvc cache.Service, controlSvc *control.ServiceRuntime) admin.Endpoint {
+					return admin.NewSummaryEndpoint(cfg, cacheSvc, controlSvc)
+				},
+				dix.Order(10),
+			),
 		),
 		dix.WithModuleImports(
 			configuredHTTPModule[admin.Config, admin.Endpoint]("admin", func(cfg admin.Config) runtime.HTTPConfig {
