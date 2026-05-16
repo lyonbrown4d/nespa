@@ -58,6 +58,9 @@ const (
 	OpCacheBatchDelete
 	OpCacheBatchExists
 	OpCacheBatchTouch
+	OpNodeExportRange
+	OpNodeImportSnapshot
+	OpNodeDeleteRange
 )
 
 type Flags uint8

@@ -53,6 +53,7 @@ Default local endpoints:
 
 ```text
 control   http://127.0.0.1:7401
+raft      tcp://127.0.0.1:7601
 node      tcp://127.0.0.1:7403
 admin     http://127.0.0.1:7404 (optional)
 frontend  http://127.0.0.1:7402 (optional, disabled by default)
@@ -80,6 +81,7 @@ curl http://127.0.0.1:7401/v1/control/spaces
 curl http://127.0.0.1:7401/v1/control/entities
 curl http://127.0.0.1:7401/v1/control/nodes
 curl http://127.0.0.1:7401/v1/control/rebalance/events
+curl http://127.0.0.1:7401/v1/control/rebalance/plans
 # optional frontend route cache view
 curl http://127.0.0.1:7402/routes
 ```
@@ -188,11 +190,23 @@ frame codec lives in `protocol`. Routed clients refresh the control snapshot and
 retry once when a node reports a stale route or when a dead-node connection fails
 and the refreshed route has changed.
 
-The control plane exposes a narrow rebalance event view at
-`/v1/control/rebalance/events`. It records route-table changes such as node join,
-node suspect/dead, node recovery, address changes, and space route creation. This
-is currently an observability/control-state surface only; data migration and
-replication are not implemented in this stage.
+The control plane exposes rebalance event and migration-plan views at
+`/v1/control/rebalance/events` and `/v1/control/rebalance/plans`. Events record
+route-table changes such as node join, node suspect/dead, node recovery, address
+changes, and space route creation. Migration plans derive vslot ranges that must
+move between source and target nodes. DataNodes expose internal TCP binary ops to
+export a namespace/space/vslot range, import the snapshot on the target, and
+delete the source range. The control migration executor is enabled by default:
+it claims planned tasks through the control FSM, runs `export -> import ->
+delete`, and marks tasks and plans as `running`, `done`, or `failed`. Production
+retry/backoff policy and replica catch-up are the next stage.
+
+Control writes run through a Dragonboat-backed Raft state machine by default.
+Use `--control-raft-dir` to persist the Dragonboat NodeHost data; when empty,
+the server uses temporary runtime storage. `--control-snapshot-path` remains an
+optional JSON import/export helper. DataNode memory-engine snapshots can be
+restored/saved with `--node-snapshot-path`; this is a local persistence
+foundation, not yet a replicated data log.
 
 The data plane is intentionally a versioned binary KV and primitive collection
 plane. It supports `set/get/delete/exists/touch/adjust`, batch variants, and a

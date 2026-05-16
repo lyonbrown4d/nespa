@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -96,7 +97,12 @@ func controlModule(enabled bool) dix.Module {
 		),
 		dix.WithModuleHooks(
 			dix.OnStart2[*slog.Logger, eventx.BusRuntime](control.SubscribeRebalanceEvents, dix.LifecycleName("control.rebalance.subscribe"), dix.LifecycleBefore("control.http.start")),
+			dix.OnStart2[*slog.Logger, *control.ServiceRuntime](control.RestoreSnapshot, dix.LifecycleName("control.snapshot.restore"), dix.LifecycleBefore("control.dragonboat.start")),
+			dix.OnStart2[*slog.Logger, *control.ServiceRuntime](control.StartDragonboat, dix.LifecycleName("control.dragonboat.start"), dix.LifecycleBefore("control.http.start")),
+			dix.OnStart2[*slog.Logger, *control.ServiceRuntime](control.StartMigrationExecutor, dix.LifecycleName("control.migration.start"), dix.LifecycleAfter("control.http.start")),
 			dix.OnStart2[*slog.Logger, *control.ServiceRuntime](control.StartLiveness, dix.LifecycleName("control.liveness.start"), dix.LifecycleAfter("control.http.start")),
+			dix.OnStop2[*slog.Logger, *control.ServiceRuntime](control.SaveSnapshot, dix.LifecycleName("control.snapshot.save")),
+			dix.OnStop2[*slog.Logger, *control.ServiceRuntime](control.StopDragonboat, dix.LifecycleName("control.dragonboat.stop"), dix.LifecycleAfter("control.http.stop")),
 		),
 	)
 }
@@ -125,14 +131,15 @@ func nodeModule(enabled bool) dix.Module {
 		return dix.NewModule("node", dix.Disabled(true))
 	}
 
-	eng := engine.NewMemory(engine.Config{
-		ShardCount:    16,
-		SweepInterval: time.Second,
-	})
-
 	return dix.NewModule("node",
 		dix.WithModuleProviders(
-			dix.Provider1(func(cfg node.Config) cache.Service {
+			dix.Provider1(func(node.Config) engine.Engine {
+				return engine.NewMemory(engine.Config{
+					ShardCount:    16,
+					SweepInterval: time.Second,
+				})
+			}),
+			dix.Provider2(func(cfg node.Config, eng engine.Engine) cache.Service {
 				return cache.NewService(eng, cache.WithQuota(cache.QuotaConfig{
 					DefaultNamespaceMemoryBytes: cfg.DefaultNamespaceMemoryBytes,
 					DefaultSpaceMemoryBytes:     cfg.DefaultSpaceMemoryBytes,
@@ -147,7 +154,7 @@ func nodeModule(enabled bool) dix.Module {
 			}),
 		),
 		dix.WithModuleImports(
-			engineModule(eng, time.Second),
+			engineModule(time.Second),
 		),
 		dix.WithModuleHooks(
 			dix.OnStart2[*slog.Logger, *cachetcp.Server](func(ctx context.Context, logger *slog.Logger, server *cachetcp.Server) error {
@@ -189,22 +196,26 @@ func adminModule(enabled bool) dix.Module {
 	)
 }
 
-func engineModule(eng engine.Engine, sweepInterval time.Duration) dix.Module {
+func engineModule(sweepInterval time.Duration) dix.Module {
 	if sweepInterval <= 0 {
 		sweepInterval = time.Second
 	}
 
 	return dix.NewModule("node.engine",
-		dix.WithModuleProviders(
-			dix.Value[engine.Engine](eng),
-		),
 		dix.WithModuleHooks(
+			dix.OnStart3[*slog.Logger, node.Config, engine.Engine](node.RestoreEngineSnapshot, dix.LifecycleName("node.engine.snapshot.restore"), dix.LifecycleBefore("node.tcp.start")),
 			dix.OnStart[engine.Engine](func(ctx context.Context, eng engine.Engine) error {
 				go runSweeper(ctx, eng, sweepInterval)
 				return nil
 			}, dix.LifecycleName("node.engine.sweeper.start")),
-			dix.OnStop[engine.Engine](func(_ context.Context, eng engine.Engine) error {
-				return eng.Close()
+			dix.OnStop3[*slog.Logger, node.Config, engine.Engine](func(ctx context.Context, logger *slog.Logger, cfg node.Config, eng engine.Engine) error {
+				if err := node.SaveEngineSnapshot(ctx, logger, cfg, eng); err != nil {
+					return fmt.Errorf("save node engine snapshot: %w", err)
+				}
+				if err := eng.Close(); err != nil {
+					return fmt.Errorf("close node engine: %w", err)
+				}
+				return nil
 			}, dix.LifecycleName("node.engine.stop")),
 		),
 	)

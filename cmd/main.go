@@ -104,6 +104,18 @@ type identityConfig struct {
 	ID string `mapstructure:"id"`
 }
 
+type numericIdentityConfig struct {
+	ID uint64 `mapstructure:"id"`
+}
+
+type snapshotConfig struct {
+	Path string `mapstructure:"path"`
+}
+
+type timeoutConfig struct {
+	Timeout time.Duration `mapstructure:"timeout"`
+}
+
 type afterConfig struct {
 	After time.Duration `mapstructure:"after"`
 }
@@ -118,11 +130,28 @@ type controlLivenessConfig struct {
 	Dead    afterConfig    `mapstructure:"dead"`
 }
 
-type controlConfig struct {
-	Enabled  bool                  `mapstructure:"enabled"`
+type controlMigrationConfig struct {
+	Enabled bool           `mapstructure:"enabled"`
+	Sweep   intervalConfig `mapstructure:"sweep"`
+	Task    timeoutConfig  `mapstructure:"task"`
+}
+
+type controlRaftConfig struct {
+	Dir      string                `mapstructure:"dir"`
 	Addr     string                `mapstructure:"addr"`
-	Cluster  identityConfig        `mapstructure:"cluster"`
-	Liveness controlLivenessConfig `mapstructure:"liveness"`
+	Cluster  numericIdentityConfig `mapstructure:"cluster"`
+	Node     numericIdentityConfig `mapstructure:"node"`
+	Proposal timeoutConfig         `mapstructure:"proposal"`
+}
+
+type controlConfig struct {
+	Enabled   bool                   `mapstructure:"enabled"`
+	Addr      string                 `mapstructure:"addr"`
+	Cluster   identityConfig         `mapstructure:"cluster"`
+	Snapshot  snapshotConfig         `mapstructure:"snapshot"`
+	Raft      controlRaftConfig      `mapstructure:"raft"`
+	Liveness  controlLivenessConfig  `mapstructure:"liveness"`
+	Migration controlMigrationConfig `mapstructure:"migration"`
 }
 
 type nodeConfig struct {
@@ -130,6 +159,7 @@ type nodeConfig struct {
 	Addr      string          `mapstructure:"addr"`
 	ID        string          `mapstructure:"id"`
 	Heartbeat heartbeatConfig `mapstructure:"heartbeat"`
+	Snapshot  snapshotConfig  `mapstructure:"snapshot"`
 	Quota     quotaConfig     `mapstructure:"quota"`
 }
 

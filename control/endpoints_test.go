@@ -36,6 +36,7 @@ func controlEndpointRoutes() []struct {
 		{method: http.MethodGet, path: "/v1/control/state"},
 		{method: http.MethodGet, path: "/v1/control/snapshot"},
 		{method: http.MethodGet, path: "/v1/control/rebalance/events"},
+		{method: http.MethodGet, path: "/v1/control/rebalance/plans"},
 		{method: http.MethodGet, path: "/v1/control/namespaces"},
 		{method: http.MethodPost, path: "/v1/control/namespaces"},
 		{method: http.MethodPost, path: "/v1/control/namespaces/version-bump"},

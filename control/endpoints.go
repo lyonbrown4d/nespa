@@ -18,11 +18,11 @@ type readEndpoint struct {
 }
 
 type catalogEndpoint struct {
-	state *ControlState
+	svc *ServiceRuntime
 }
 
 type nodeEndpoint struct {
-	state *ControlState
+	svc *ServiceRuntime
 }
 
 func NewReadEndpoint(svc *ServiceRuntime) Endpoint {
@@ -30,11 +30,11 @@ func NewReadEndpoint(svc *ServiceRuntime) Endpoint {
 }
 
 func NewCatalogEndpoint(svc *ServiceRuntime) Endpoint {
-	return &catalogEndpoint{state: svc.state}
+	return &catalogEndpoint{svc: svc}
 }
 
 func NewNodeEndpoint(svc *ServiceRuntime) Endpoint {
-	return &nodeEndpoint{state: svc.state}
+	return &nodeEndpoint{svc: svc}
 }
 
 func (e *readEndpoint) controlEndpoint() {}
@@ -48,6 +48,7 @@ func (e *readEndpoint) Register(registrar httpx.Registrar) {
 	httpx.MustGroupGet(scope, "/state", e.State)
 	httpx.MustGroupGet(scope, "/snapshot", e.Snapshot)
 	httpx.MustGroupGet(scope, "/rebalance/events", e.RebalanceEvents)
+	httpx.MustGroupGet(scope, "/rebalance/plans", e.MigrationPlans)
 }
 
 func (e *readEndpoint) State(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.StateBody], error) {
@@ -60,6 +61,10 @@ func (e *readEndpoint) Snapshot(context.Context, *runtime.EmptyInput) (*runtime.
 
 func (e *readEndpoint) RebalanceEvents(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.RebalanceEventsBody], error) {
 	return runtime.JSON(e.state.RebalanceEvents()), nil
+}
+
+func (e *readEndpoint) MigrationPlans(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.MigrationPlansBody], error) {
+	return runtime.JSON(e.state.MigrationPlans()), nil
 }
 
 func (e *catalogEndpoint) controlEndpoint() {}
@@ -81,14 +86,14 @@ func (e *catalogEndpoint) Register(registrar httpx.Registrar) {
 }
 
 func (e *catalogEndpoint) Namespaces(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.NamespacesBody], error) {
-	return runtime.JSON(e.state.Namespaces()), nil
+	return runtime.JSON(e.svc.Namespaces()), nil
 }
 
 func (e *catalogEndpoint) CreateNamespace(
-	_ context.Context,
+	ctx context.Context,
 	input *controlapi.CreateNamespaceInput,
 ) (*runtime.JSONResponse[controlapi.CreateNamespaceResponse], error) {
-	response, err := e.state.CreateNamespace(input.Body.Namespace)
+	response, err := e.svc.CreateNamespace(ctx, input.Body.Namespace)
 	if err != nil {
 		return nil, controlStateError("create namespace failed", err)
 	}
@@ -96,10 +101,10 @@ func (e *catalogEndpoint) CreateNamespace(
 }
 
 func (e *catalogEndpoint) BumpNamespaceVersion(
-	_ context.Context,
+	ctx context.Context,
 	input *controlapi.BumpNamespaceVersionInput,
 ) (*runtime.JSONResponse[controlapi.BumpNamespaceVersionResponse], error) {
-	response, err := e.state.BumpNamespaceVersion(input.Body.Namespace)
+	response, err := e.svc.BumpNamespaceVersion(ctx, input.Body.Namespace)
 	if err != nil {
 		return nil, controlStateError("bump namespace version failed", err)
 	}
@@ -107,14 +112,14 @@ func (e *catalogEndpoint) BumpNamespaceVersion(
 }
 
 func (e *catalogEndpoint) Spaces(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.SpacesBody], error) {
-	return runtime.JSON(e.state.Spaces()), nil
+	return runtime.JSON(e.svc.Spaces()), nil
 }
 
 func (e *catalogEndpoint) CreateSpace(
 	ctx context.Context,
 	input *controlapi.CreateSpaceInput,
 ) (*runtime.JSONResponse[controlapi.CreateSpaceResponse], error) {
-	response, err := e.state.CreateSpace(ctx, input.Body.Namespace, input.Body.Space)
+	response, err := e.svc.CreateSpace(ctx, input.Body.Namespace, input.Body.Space)
 	if err != nil {
 		return nil, controlStateError("create space failed", err)
 	}
@@ -122,10 +127,10 @@ func (e *catalogEndpoint) CreateSpace(
 }
 
 func (e *catalogEndpoint) BumpSpaceVersion(
-	_ context.Context,
+	ctx context.Context,
 	input *controlapi.BumpSpaceVersionInput,
 ) (*runtime.JSONResponse[controlapi.BumpSpaceVersionResponse], error) {
-	response, err := e.state.BumpSpaceVersion(input.Body.Namespace, input.Body.Space)
+	response, err := e.svc.BumpSpaceVersion(ctx, input.Body.Namespace, input.Body.Space)
 	if err != nil {
 		return nil, controlStateError("bump space version failed", err)
 	}
@@ -133,14 +138,14 @@ func (e *catalogEndpoint) BumpSpaceVersion(
 }
 
 func (e *catalogEndpoint) Entities(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.EntitiesBody], error) {
-	return runtime.JSON(e.state.Entities()), nil
+	return runtime.JSON(e.svc.Entities()), nil
 }
 
 func (e *catalogEndpoint) CreateEntity(
-	_ context.Context,
+	ctx context.Context,
 	input *controlapi.CreateEntityInput,
 ) (*runtime.JSONResponse[controlapi.CreateEntityResponse], error) {
-	response, err := e.state.CreateEntity(input.Body.Namespace, input.Body.Space, input.Body.Entity)
+	response, err := e.svc.CreateEntity(ctx, input.Body.Namespace, input.Body.Space, input.Body.Entity)
 	if err != nil {
 		return nil, controlStateError("create entity failed", err)
 	}
@@ -161,14 +166,14 @@ func (e *nodeEndpoint) Register(registrar httpx.Registrar) {
 }
 
 func (e *nodeEndpoint) Nodes(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.NodesBody], error) {
-	return runtime.JSON(e.state.Nodes()), nil
+	return runtime.JSON(e.svc.Nodes()), nil
 }
 
 func (e *nodeEndpoint) RegisterNode(
 	ctx context.Context,
 	input *controlapi.RegisterNodeInput,
 ) (*runtime.JSONResponse[controlapi.RegisterNodeResponse], error) {
-	response, err := e.state.RegisterNode(ctx, input.Body.NodeID, input.Body.Addr)
+	response, err := e.svc.RegisterNode(ctx, input.Body.NodeID, input.Body.Addr)
 	if err != nil {
 		return nil, controlStateError("invalid node registration", err)
 	}
@@ -179,7 +184,7 @@ func (e *nodeEndpoint) Heartbeat(
 	ctx context.Context,
 	input *controlapi.HeartbeatInput,
 ) (*runtime.JSONResponse[controlapi.HeartbeatResponse], error) {
-	response, err := e.state.Heartbeat(ctx, input.Body.NodeID, input.Body.Addr)
+	response, err := e.svc.Heartbeat(ctx, input.Body.NodeID, input.Body.Addr)
 	if err != nil {
 		return nil, controlStateError("invalid node heartbeat", err)
 	}

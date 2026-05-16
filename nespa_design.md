@@ -90,12 +90,17 @@ Nespa 第一阶段明确不做：
 - DataNode memory engine 已有 TTL、ExpectedVersion 乐观锁、namespace/space version 可见性、sampled eviction、namespace/space memory quota；
 - set、adjust、primitive 写入和 batch 写入已接入 quota admission，写前预估增长成本，不允许绕过 space/namespace quota；ExpectedVersion 未命中时不会提前触发 quota reject；
 - routed TCP client 会读取 control snapshot，按 vslot 直连 DataNode；batch set/get/delete/exists/touch/primitive 会按 route 分组，失败后刷新 snapshot 并只重试未完成组；
+- control 写路径默认通过 Dragonboat Raft proposal 驱动 FSM Apply，并使用 Dragonboat log/snapshot 做控制面恢复；`--control-snapshot-path` 只作为 JSON 导入/导出辅助；
+- control rebalance 除事件外已生成 migration plan，记录需要从 source node 迁移到 target node 的 namespace/space/vslot 范围；
+- DataNode 已具备节点级 range migration primitive：按 `namespace/space/vslot` 导出 snapshot、导入 snapshot、删除源 range，并通过 TCP binary protocol 暴露给内部迁移执行器；
+- control migration executor 默认启用，会通过 Dragonboat/FSM claim planned task，顺序执行 `export -> import -> delete`，并把 task/plan 标记为 `running/done/failed`；
+- DataNode memory engine 支持本地 snapshot/restore，并可通过 `--node-snapshot-path` 做进程重启恢复；这是本地持久化基础，不等价于副本复制；
 - Go SDK 已放在 `sdk/go`，通过 go work 参与多子包开发；Java SDK 已放在 `sdk/java`，使用 Gradle Kotlin DSL、wrapper、version catalog、Lombok plugin、JPMS，并带 direct TCP/wire smoke 覆盖。
 
 尚未落地或仍是设计目标：
 
-- Dragonboat-backed 控制面 FSM、持久化 snapshot/restore；
-- 数据迁移、复制、副本追赶和生产级 rebalance；
+- 3 节点控制面部署、membership change、跨节点 Raft 配置管理；
+- migration task 并发/重试/限流策略、复制、副本追赶和生产级 rebalance；
 - schema/query/index planner；
 - principal/grant 鉴权链路；
 - Java routed SDK、更多语言 SDK、生产级连接池和 TLS 策略。
@@ -334,10 +339,10 @@ github.com/lni/dragonboat/v3
 - 默认使用 Pebble 存储 Raft logs
 - 不需要额外引入 etcd server
 
-生产版本建议使用：
+当前实现锁定在：
 
 ```bash
-go get github.com/lni/dragonboat/v3@latest
+github.com/lni/dragonboat/v3 v3.3.8
 ```
 
 不建议在生产第一版使用 v4 master。
@@ -728,7 +733,7 @@ GET  /v1/control/entities
 POST /v1/control/entities
 ```
 
-`CreateNamespace`、`CreateSpace` 和 `CreateEntity` 语义按未来 FSM 命令设计：同名重复创建为幂等返回，新增对象才推进 revision。`CreateEntity` 必须引用已存在的 namespace 和 space；第一阶段只声明 entity catalog，不包含 Redis 数据结构兼容、schema DSL、index schema 或 query planner。生产实现接入 Dragonboat 后，这些 HTTP handler 只负责校验、鉴权和 propose command，不能直接修改状态。
+`CreateNamespace`、`CreateSpace` 和 `CreateEntity` 语义按 FSM 命令设计：同名重复创建为幂等返回，新增对象才推进 revision。`CreateEntity` 必须引用已存在的 namespace 和 space；第一阶段只声明 entity catalog，不包含 Redis 数据结构兼容、schema DSL、index schema 或 query planner。当前 HTTP handler 只负责解析请求并调用 ServiceRuntime，写入由 Dragonboat proposal 提交后再 apply，不能直接修改状态。
 
 HTTP API 在代码组织上按 `httpx.Endpoint` 拆分，endpoint 通过 `dix` contribution 注入到服务专属集合，再由 HTTP module 启动时统一注册。这样 control/admin 的路由注册保持声明式，后续新增 schema、query、migration endpoint 时只需要新增 endpoint contribution，不修改统一启动逻辑。
 
@@ -2053,10 +2058,10 @@ multi-region deployment
 
 对策：
 
-- 生产使用 v3 module
-- vendor 或 lock 版本
-- 封装 `internal/control/raft` adapter
-- 不让业务代码直接依赖 Dragonboat API
+- 生产使用 v3 module，并在 `go.mod` 锁定版本
+- 控制面业务状态保持在确定性的 FSM/command 边界内
+- Dragonboat 启停、proposal、readiness、snapshot 编码集中在 control runtime 层
+- 不把 Dragonboat API 泄漏到 DataNode、SDK 或业务协议
 
 ### 21.2 Go GC 风险
 

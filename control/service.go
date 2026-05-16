@@ -6,7 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/arcgolabs/eventx"
@@ -21,6 +24,9 @@ type Config struct {
 	ClusterID      string
 	BootstrapNodes []controlapi.RegisterNodeBody
 	Liveness       LivenessConfig
+	Migration      MigrationConfig
+	Persistence    PersistenceConfig
+	Raft           RaftConfig
 }
 
 type LivenessConfig struct {
@@ -29,10 +35,18 @@ type LivenessConfig struct {
 	DeadAfter     time.Duration
 }
 
+type PersistenceConfig struct {
+	SnapshotPath string
+}
+
 type ServiceRuntime struct {
-	cfg      Config
-	state    *ControlState
-	liveness LivenessConfig
+	cfg       Config
+	state     *ControlState
+	fsm       *ControlFSM
+	liveness  LivenessConfig
+	migration MigrationConfig
+	raftMu    sync.RWMutex
+	raft      *DragonboatRuntime
 }
 
 func NewServiceRuntime(cfg Config) *ServiceRuntime {
@@ -41,17 +55,54 @@ func NewServiceRuntime(cfg Config) *ServiceRuntime {
 
 func NewServiceRuntimeWithEvents(cfg Config, bus eventx.BusRuntime) *ServiceRuntime {
 	state := NewControlStateWithEvents(cfg.ClusterID, bus)
-	for _, node := range cfg.BootstrapNodes {
-		if _, err := state.RegisterNode(context.Background(), node.NodeID, node.Addr); err != nil {
-			continue
-		}
-	}
 
 	return &ServiceRuntime{
-		cfg:      cfg,
-		state:    state,
-		liveness: normalizeLivenessConfig(cfg.Liveness),
+		cfg:       cfg,
+		state:     state,
+		fsm:       NewControlFSM(state),
+		liveness:  normalizeLivenessConfig(cfg.Liveness),
+		migration: cfg.Migration,
 	}
+}
+
+func (s *ServiceRuntime) CreateNamespace(ctx context.Context, namespace string) (controlapi.CreateNamespaceResponse, error) {
+	result, err := s.apply(ctx, Command{Type: CommandCreateNamespace, Namespace: namespace})
+	return result.CreateNamespace, err
+}
+
+func (s *ServiceRuntime) CreateSpace(ctx context.Context, namespace, space string) (controlapi.CreateSpaceResponse, error) {
+	result, err := s.apply(ctx, Command{Type: CommandCreateSpace, Namespace: namespace, Space: space})
+	return result.CreateSpace, err
+}
+
+func (s *ServiceRuntime) CreateEntity(ctx context.Context, namespace, space, entity string) (controlapi.CreateEntityResponse, error) {
+	result, err := s.apply(ctx, Command{
+		Type:      CommandCreateEntity,
+		Namespace: namespace,
+		Space:     space,
+		Entity:    entity,
+	})
+	return result.CreateEntity, err
+}
+
+func (s *ServiceRuntime) BumpNamespaceVersion(ctx context.Context, namespace string) (controlapi.BumpNamespaceVersionResponse, error) {
+	result, err := s.apply(ctx, Command{Type: CommandBumpNamespace, Namespace: namespace})
+	return result.BumpNamespace, err
+}
+
+func (s *ServiceRuntime) BumpSpaceVersion(ctx context.Context, namespace, space string) (controlapi.BumpSpaceVersionResponse, error) {
+	result, err := s.apply(ctx, Command{Type: CommandBumpSpace, Namespace: namespace, Space: space})
+	return result.BumpSpace, err
+}
+
+func (s *ServiceRuntime) RegisterNode(ctx context.Context, nodeID, addr string) (controlapi.RegisterNodeResponse, error) {
+	result, err := s.apply(ctx, Command{Type: CommandRegisterNode, NodeID: nodeID, Addr: addr, NowUnix: time.Now().Unix()})
+	return result.RegisterNode, err
+}
+
+func (s *ServiceRuntime) Heartbeat(ctx context.Context, nodeID, addr string) (controlapi.HeartbeatResponse, error) {
+	result, err := s.apply(ctx, Command{Type: CommandHeartbeat, NodeID: nodeID, Addr: addr, NowUnix: time.Now().Unix()})
+	return result.Heartbeat, err
 }
 
 func (s *ServiceRuntime) Namespaces() controlapi.NamespacesBody {
@@ -60,6 +111,10 @@ func (s *ServiceRuntime) Namespaces() controlapi.NamespacesBody {
 
 func (s *ServiceRuntime) Spaces() controlapi.SpacesBody {
 	return s.state.Spaces()
+}
+
+func (s *ServiceRuntime) Entities() controlapi.EntitiesBody {
+	return s.state.Entities()
 }
 
 func (s *ServiceRuntime) Nodes() controlapi.NodesBody {
@@ -72,6 +127,10 @@ func (s *ServiceRuntime) Revision() uint64 {
 
 func (s *ServiceRuntime) RouteCount() uint64 {
 	return checkedUint64(s.state.RouteCount())
+}
+
+func (s *ServiceRuntime) MigrationPlans() controlapi.MigrationPlansBody {
+	return s.state.MigrationPlans()
 }
 
 func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
@@ -98,6 +157,11 @@ func controlStateError(message string, err error) error {
 }
 
 func hasControlOopsCode(err error, codes ...string) bool {
+	code, ok := controlOopsCode(err)
+	return ok && slices.Contains(codes, code)
+}
+
+func controlOopsCode(err error) (string, bool) {
 	for current := err; current != nil; current = errors.Unwrap(current) {
 		oopsErr, ok := oops.AsOops(current)
 		if !ok {
@@ -107,15 +171,51 @@ func hasControlOopsCode(err error, codes ...string) bool {
 		if !ok {
 			continue
 		}
-		if slices.Contains(codes, code) {
-			return true
-		}
+		return code, true
 	}
-	return false
+	return "", false
 }
 
-func StartLiveness(ctx context.Context, logger *slog.Logger, svc *ServiceRuntime) error {
-	go runLivenessSweep(ctx, logger, svc.state, svc.liveness)
+func RestoreSnapshot(ctx context.Context, logger *slog.Logger, svc *ServiceRuntime) error {
+	path := strings.TrimSpace(svc.cfg.Persistence.SnapshotPath)
+	if path == "" {
+		return nil
+	}
+	raftDir := strings.TrimSpace(svc.cfg.Raft.NodeHostDir)
+	if raftDir != "" {
+		hasData, err := hasExistingDragonboatData(raftDir)
+		if err != nil {
+			return err
+		}
+		if hasData {
+			logger.Info("control snapshot restore skipped; dragonboat data exists", "path", path, "raft_dir", raftDir)
+			return nil
+		}
+	}
+	snapshot, err := LoadSnapshotFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if err := svc.state.RestoreSnapshot(snapshot); err != nil {
+		return err
+	}
+	logger.Info("control snapshot restored", "path", path, "revision", svc.state.Revision())
+	return nil
+}
+
+func SaveSnapshot(_ context.Context, logger *slog.Logger, svc *ServiceRuntime) error {
+	path := strings.TrimSpace(svc.cfg.Persistence.SnapshotPath)
+	if path == "" {
+		return nil
+	}
+	snapshot := svc.state.ExportSnapshot()
+	if err := SaveSnapshotFile(path, snapshot); err != nil {
+		return err
+	}
+	logger.Info("control snapshot saved", "path", path, "revision", snapshot.Revision)
 	return nil
 }
 
@@ -137,35 +237,29 @@ func SubscribeRebalanceEvents(_ context.Context, logger *slog.Logger, bus eventx
 	return err
 }
 
-func normalizeLivenessConfig(cfg LivenessConfig) LivenessConfig {
-	if cfg.SweepInterval <= 0 {
-		cfg.SweepInterval = 5 * time.Second
+func (s *ServiceRuntime) apply(ctx context.Context, command Command) (ApplyResult, error) {
+	if raft := s.dragonboatRuntime(); raft != nil {
+		return raft.Propose(ctx, command)
 	}
-	if cfg.SuspectAfter <= 0 {
-		cfg.SuspectAfter = 15 * time.Second
-	}
-	if cfg.DeadAfter <= 0 {
-		cfg.DeadAfter = 30 * time.Second
-	}
-	if cfg.DeadAfter < cfg.SuspectAfter {
-		cfg.DeadAfter = cfg.SuspectAfter
-	}
-	return cfg
+	return s.fsm.Apply(ctx, command)
 }
 
-func runLivenessSweep(ctx context.Context, logger *slog.Logger, state *ControlState, cfg LivenessConfig) {
-	ticker := time.NewTicker(cfg.SweepInterval)
-	defer ticker.Stop()
+func (s *ServiceRuntime) dragonboatRuntime() *DragonboatRuntime {
+	s.raftMu.RLock()
+	defer s.raftMu.RUnlock()
+	return s.raft
+}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case now := <-ticker.C:
-			result := state.AdvanceLiveness(ctx, now, cfg.SuspectAfter, cfg.DeadAfter)
-			for _, node := range result.Changed {
-				logger.Warn("control node liveness changed", "node_id", node.NodeID, "state", node.State, "revision", result.Revision)
-			}
-		}
+func (s *ServiceRuntime) setDragonboatRuntime(raft *DragonboatRuntime) {
+	s.raftMu.Lock()
+	defer s.raftMu.Unlock()
+	s.raft = raft
+}
+
+func (s *ServiceRuntime) clearDragonboatRuntime(raft *DragonboatRuntime) {
+	s.raftMu.Lock()
+	defer s.raftMu.Unlock()
+	if s.raft == raft {
+		s.raft = nil
 	}
 }

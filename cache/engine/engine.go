@@ -147,6 +147,11 @@ type Engine interface {
 	Primitive(context.Context, PrimitiveRequest) (PrimitiveResult, error)
 	EstimatePrimitive(context.Context, PrimitiveRequest) (PrimitiveEstimate, error)
 	Stats(context.Context) (Stats, error)
+	Snapshot(context.Context) (Snapshot, error)
+	Restore(context.Context, Snapshot) error
+	Export(context.Context, RangeOptions) (Snapshot, error)
+	Import(context.Context, Snapshot) (ImportResult, error)
+	DeleteRange(context.Context, RangeOptions) (DeleteRangeResult, error)
 	SweepExpired(context.Context, time.Time) (uint64, error)
 	Evict(context.Context, EvictOptions) (EvictResult, error)
 	Close() error
@@ -201,6 +206,11 @@ const (
 	commandPrimitive
 	commandPrimitiveEstimate
 	commandStats
+	commandSnapshot
+	commandRestore
+	commandExport
+	commandImport
+	commandDeleteRange
 	commandSweep
 	commandEvict
 )
@@ -217,22 +227,27 @@ type shardCommand struct {
 	primitive  PrimitiveRequest
 	deleteOpts DeleteOptions
 	evict      EvictOptions
+	rangeOpts  RangeOptions
+	snapshot   []SnapshotEntry
 	now        time.Time
 	reply      chan shardResult
 }
 
 type shardResult struct {
-	record    Record
-	found     bool
-	deleted   bool
-	touched   bool
-	primitive PrimitiveResult
-	estimate  PrimitiveEstimate
-	stats     ShardStats
-	spaces    *collectionmapping.Map[spaceKey, spaceUsage]
-	swept     uint64
-	evicted   EvictResult
-	err       error
+	record       Record
+	found        bool
+	deleted      bool
+	touched      bool
+	primitive    PrimitiveResult
+	estimate     PrimitiveEstimate
+	stats        ShardStats
+	spaces       *collectionmapping.Map[spaceKey, spaceUsage]
+	snapshot     []SnapshotEntry
+	imported     uint64
+	deletedRange uint64
+	swept        uint64
+	evicted      EvictResult
+	err          error
 }
 
 type entry struct {

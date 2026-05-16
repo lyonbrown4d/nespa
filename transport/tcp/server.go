@@ -157,6 +157,9 @@ func (s *Server) cacheHandlers() map[protocol.Op]frameHandler {
 		protocol.OpCacheBatchExists:    s.handleBatchExists,
 		protocol.OpCacheBatchTouch:     s.handleBatchTouch,
 		protocol.OpNodeHeartbeat:       s.handleUnsupportedFrame,
+		protocol.OpNodeExportRange:     s.handleExportRange,
+		protocol.OpNodeImportSnapshot:  s.handleImportSnapshot,
+		protocol.OpNodeDeleteRange:     s.handleDeleteRange,
 		protocol.OpControlSnapshot:     s.handleUnsupportedFrame,
 		protocol.OpControlWatch:        s.handleUnsupportedFrame,
 	}

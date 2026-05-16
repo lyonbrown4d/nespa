@@ -1,7 +1,6 @@
 package control
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -26,6 +25,7 @@ const (
 	rebalanceReasonSpaceCreated     = "space_created"
 
 	maxRebalanceEvents = 128
+	maxMigrationPlans  = 128
 )
 
 const RebalanceEventName = "control.rebalance"
@@ -47,8 +47,11 @@ type ControlState struct {
 	entities   *collectionmapping.Map[entityRef, controlapi.EntityBody]
 	nodes      *collectionmapping.Map[string, controlapi.NodeBody]
 	events     *collectionlist.List[controlapi.RebalanceEventBody]
+	plans      *collectionlist.List[controlapi.MigrationPlanBody]
 	eventBus   eventx.BusRuntime
 	nextEvent  uint64
+	nextPlan   uint64
+	lastRoutes []controlapi.RouteBody
 	now        func() time.Time
 }
 
@@ -80,132 +83,9 @@ func NewControlStateWithClockAndEvents(clusterID string, now func() time.Time, b
 		entities:   collectionmapping.NewMap[entityRef, controlapi.EntityBody](),
 		nodes:      collectionmapping.NewMap[string, controlapi.NodeBody](),
 		events:     collectionlist.NewList[controlapi.RebalanceEventBody](),
+		plans:      collectionlist.NewList[controlapi.MigrationPlanBody](),
 		eventBus:   bus,
 		now:        now,
-	}
-}
-
-func (s *ControlState) RegisterNode(ctx context.Context, nodeID, addr string) (controlapi.RegisterNodeResponse, error) {
-	nodeID, addr, err := validateNodeIdentity(nodeID, addr)
-	if err != nil {
-		return controlapi.RegisterNodeResponse{}, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	node := controlapi.NodeBody{
-		NodeID:       nodeID,
-		Addr:         addr,
-		State:        nodeStateHealthy,
-		LastSeenUnix: s.now().Unix(),
-	}
-
-	previous, exists := s.nodes.Get(nodeID)
-	reason, changed := nodeRegistrationEventReason(previous, exists, node)
-	if changed {
-		s.revision++
-	}
-	s.nodes.Set(nodeID, node)
-	if changed {
-		s.recordRebalanceEventLocked(ctx, rebalanceEvent{
-			reason: rebalanceReason(reason),
-			node:   node,
-		})
-	}
-
-	return controlapi.RegisterNodeResponse{
-		Revision: s.revision,
-		Node:     node,
-	}, nil
-}
-
-func (s *ControlState) Heartbeat(ctx context.Context, nodeID, addr string) (controlapi.HeartbeatResponse, error) {
-	nodeID, addr, err := validateNodeIdentity(nodeID, addr)
-	if err != nil {
-		return controlapi.HeartbeatResponse{}, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	node, exists := s.nodes.Get(nodeID)
-	var reason rebalanceReason
-	changed := false
-	if !exists {
-		node = controlapi.NodeBody{
-			NodeID: nodeID,
-			Addr:   addr,
-			State:  nodeStateHealthy,
-		}
-		s.revision++
-		reason = rebalanceReasonNodeRegistered
-		changed = true
-	}
-	if node.Addr != addr {
-		node.Addr = addr
-		s.revision++
-		reason = rebalanceReasonNodeAddress
-		changed = true
-	}
-	if node.State != nodeStateHealthy {
-		node.State = nodeStateHealthy
-		s.revision++
-		reason = rebalanceReasonNodeRecovered
-		changed = true
-	}
-	node.LastSeenUnix = s.now().Unix()
-	s.nodes.Set(nodeID, node)
-	if changed {
-		s.recordRebalanceEventLocked(ctx, rebalanceEvent{
-			reason: reason,
-			node:   node,
-		})
-	}
-
-	return controlapi.HeartbeatResponse{
-		Revision: s.revision,
-		Node:     node,
-	}, nil
-}
-
-func (s *ControlState) AdvanceLiveness(ctx context.Context, now time.Time, suspectAfter, deadAfter time.Duration) LivenessResult {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	var changed []controlapi.NodeBody
-	s.nodes.Range(func(nodeID string, node controlapi.NodeBody) bool {
-		if node.LastSeenUnix <= 0 {
-			return true
-		}
-
-		nextState := node.State
-		lastSeen := time.Unix(node.LastSeenUnix, 0)
-		age := now.Sub(lastSeen)
-		switch {
-		case deadAfter > 0 && age >= deadAfter:
-			nextState = nodeStateDead
-		case suspectAfter > 0 && age >= suspectAfter:
-			nextState = nodeStateSuspect
-		}
-
-		if node.State == nextState {
-			return true
-		}
-		node.State = nextState
-		s.nodes.Set(nodeID, node)
-		s.revision++
-		changed = append(changed, node)
-		s.recordRebalanceEventLocked(ctx, rebalanceEvent{
-			reason: livenessRebalanceReason(nextState),
-			node:   node,
-		})
-		return true
-	})
-
-	return LivenessResult{
-		Revision: s.revision,
-		Changed:  changed,
 	}
 }
 
@@ -253,6 +133,16 @@ func (s *ControlState) RebalanceEvents() controlapi.RebalanceEventsBody {
 	return controlapi.RebalanceEventsBody{
 		Revision: s.revision,
 		Events:   s.events.Values(),
+	}
+}
+
+func (s *ControlState) MigrationPlans() controlapi.MigrationPlansBody {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return controlapi.MigrationPlansBody{
+		Revision: s.revision,
+		Plans:    s.plans.Values(),
 	}
 }
 

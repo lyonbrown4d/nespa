@@ -17,6 +17,11 @@ type Stats = engine.Stats
 type ShardStats = engine.ShardStats
 type SpaceStats = engine.SpaceStats
 type EvictResult = engine.EvictResult
+type Snapshot = engine.Snapshot
+type SnapshotEntry = engine.SnapshotEntry
+type RangeOptions = engine.RangeOptions
+type ImportResult = engine.ImportResult
+type DeleteRangeResult = engine.DeleteRangeResult
 
 var ErrQuotaExceeded = oops.Code("quota_exceeded").In("cache").New("cache: quota exceeded")
 
@@ -88,6 +93,9 @@ type Service interface {
 	BatchTouch(context.Context, []TouchRequest) ([]TouchResult, error)
 	Stats(context.Context) (Stats, error)
 	Evict(context.Context, EvictRequest) (EvictResult, error)
+	Export(context.Context, RangeOptions) (Snapshot, error)
+	Import(context.Context, Snapshot) (ImportResult, error)
+	DeleteRange(context.Context, RangeOptions) (DeleteRangeResult, error)
 }
 
 type SetRequest struct {

@@ -43,6 +43,8 @@ func (s *ControlState) recordRebalanceEventLocked(ctx context.Context, event reb
 	if event.reason == "" {
 		return
 	}
+	previousRoutes := append([]controlapi.RouteBody(nil), s.lastRoutes...)
+	currentRoutes := routesForNodes(s.sortedNodesLocked(), s.sortedSpacesLocked())
 	s.nextEvent++
 	body := controlapi.RebalanceEventBody{
 		ID:            s.nextEvent,
@@ -54,16 +56,105 @@ func (s *ControlState) recordRebalanceEventLocked(ctx context.Context, event reb
 		State:         event.node.State,
 		Namespace:     event.namespace,
 		Space:         event.space,
-		RouteCount:    len(routesForNodes(s.sortedNodesLocked(), s.sortedSpacesLocked())),
+		RouteCount:    len(currentRoutes),
 		CreatedAtUnix: s.now().Unix(),
 	}
 	s.events.Add(body)
 	for s.events.Len() > maxRebalanceEvents {
 		s.events.RemoveAt(0)
 	}
+	s.recordMigrationPlanLocked(body, previousRoutes, currentRoutes)
+	s.lastRoutes = currentRoutes
 	if s.eventBus != nil {
 		if err := s.eventBus.PublishAsync(ctx, RebalanceEvent{Event: body}); err != nil {
 			return
 		}
 	}
+}
+
+func (s *ControlState) recordMigrationPlanLocked(
+	event controlapi.RebalanceEventBody,
+	previousRoutes []controlapi.RouteBody,
+	currentRoutes []controlapi.RouteBody,
+) {
+	tasks := buildMigrationTasks(event, previousRoutes, currentRoutes)
+	if len(tasks) == 0 {
+		return
+	}
+	s.nextPlan++
+	for index := range tasks {
+		tasks[index].PlanID = s.nextPlan
+		tasks[index].TaskID = uint64(index + 1)
+	}
+	plan := controlapi.MigrationPlanBody{
+		ID:            s.nextPlan,
+		Revision:      event.Revision,
+		Reason:        event.Reason,
+		State:         "planned",
+		CreatedAtUnix: event.CreatedAtUnix,
+		Tasks:         tasks,
+	}
+	s.plans.Add(plan)
+	for s.plans.Len() > maxMigrationPlans {
+		s.plans.RemoveAt(0)
+	}
+}
+
+func buildMigrationTasks(
+	event controlapi.RebalanceEventBody,
+	previousRoutes []controlapi.RouteBody,
+	currentRoutes []controlapi.RouteBody,
+) []controlapi.MigrationTaskBody {
+	tasks := make([]controlapi.MigrationTaskBody, 0)
+	for currentIndex := range currentRoutes {
+		current := currentRoutes[currentIndex]
+		for previousIndex := range previousRoutes {
+			previous := previousRoutes[previousIndex]
+			if !sameRouteScope(previous, current) || previous.NodeID == current.NodeID {
+				continue
+			}
+			start, end, ok := routeOverlap(previous, current)
+			if !ok {
+				continue
+			}
+			tasks = append(tasks, controlapi.MigrationTaskBody{
+				Revision:      event.Revision,
+				Namespace:     current.Namespace,
+				Space:         current.Space,
+				VSlotStart:    start,
+				VSlotEnd:      end,
+				SourceNodeID:  previous.NodeID,
+				SourceAddr:    previous.Addr,
+				TargetNodeID:  current.NodeID,
+				TargetAddr:    current.Addr,
+				State:         "planned",
+				CreatedAtUnix: event.CreatedAtUnix,
+			})
+		}
+	}
+	return tasks
+}
+
+func sameRouteScope(left, right controlapi.RouteBody) bool {
+	return left.Namespace == right.Namespace && left.Space == right.Space
+}
+
+func routeOverlap(left, right controlapi.RouteBody) (uint32, uint32, bool) {
+	start := maxUint32(left.VSlotStart, right.VSlotStart)
+	end := minUint32(left.VSlotEnd, right.VSlotEnd)
+	return start, end, start <= end
+}
+
+func minUint32(left, right uint32) uint32 {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func maxUint32(left, right uint32) uint32 {
+	if left > right {
+		return left
+	}
+	return right
 }

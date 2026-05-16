@@ -18,6 +18,11 @@ var commandHandlers = map[commandKind]commandHandler{
 	commandPrimitive:         (*shardWorker).applyPrimitive,
 	commandPrimitiveEstimate: (*shardWorker).applyPrimitiveEstimate,
 	commandStats:             applyStatsCommand,
+	commandSnapshot:          applySnapshotCommand,
+	commandRestore:           applyRestoreCommand,
+	commandExport:            applyExportCommand,
+	commandImport:            applyImportCommand,
+	commandDeleteRange:       applyDeleteRangeCommand,
 	commandSweep:             applySweepCommand,
 	commandEvict:             applyEvictCommand,
 }
@@ -46,6 +51,27 @@ func (s *shardWorker) apply(cmd shardCommand) shardResult {
 
 func applyStatsCommand(s *shardWorker, _ shardCommand) shardResult {
 	return s.statsResult()
+}
+
+func applySnapshotCommand(s *shardWorker, _ shardCommand) shardResult {
+	return shardResult{snapshot: s.snapshotEntries()}
+}
+
+func applyRestoreCommand(s *shardWorker, cmd shardCommand) shardResult {
+	return shardResult{err: s.restoreEntries(cmd.snapshot)}
+}
+
+func applyExportCommand(s *shardWorker, cmd shardCommand) shardResult {
+	return shardResult{snapshot: s.exportEntries(cmd.rangeOpts)}
+}
+
+func applyImportCommand(s *shardWorker, cmd shardCommand) shardResult {
+	imported, err := s.importEntries(cmd.snapshot)
+	return shardResult{imported: imported, err: err}
+}
+
+func applyDeleteRangeCommand(s *shardWorker, cmd shardCommand) shardResult {
+	return shardResult{deletedRange: s.deleteRange(cmd.rangeOpts)}
 }
 
 func applySweepCommand(s *shardWorker, cmd shardCommand) shardResult {

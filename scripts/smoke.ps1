@@ -46,6 +46,26 @@ function Ensure-UriAlive {
     throw "timeout waiting for $Uri"
 }
 
+function Remove-WorkDir {
+    param([string]$Path)
+
+    if (-not (Test-Path -Path $Path)) {
+        return
+    }
+
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+            Remove-Item -Path $Path -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            if ($attempt -eq 10) {
+                throw
+            }
+            Start-Sleep -Milliseconds (100 * $attempt)
+        }
+    }
+}
+
 function Parse-Bool {
     param(
         [string]$Value,
@@ -217,7 +237,5 @@ Write-Host "build server and client"
     }
 }
 finally {
-    if (Test-Path -Path $workDir) {
-        Remove-Item -Path $workDir -Recurse -Force
-    }
+    Remove-WorkDir -Path $workDir
 }
