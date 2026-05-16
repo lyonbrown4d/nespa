@@ -29,7 +29,7 @@ type refreshable interface {
 }
 
 func NewDirect(addr string) (*Client, error) {
-	backend, err := coreclient.NewTCP(coreclient.Config{Addr: addr})
+	backend, err := newDirectTCPClient(addr)
 	if err != nil {
 		return nil, fmt.Errorf("create direct nespa client: %w", err)
 	}
@@ -49,7 +49,10 @@ func (c *Client) Refresh(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
-	return backend.Refresh(ctx)
+	if err := backend.Refresh(ctx); err != nil {
+		return fmt.Errorf("refresh nespa client: %w", err)
+	}
+	return nil
 }
 
 func (c *Client) Set(ctx context.Context, key Key, value []byte, opts SetOptions) (Record, error) {
@@ -62,7 +65,7 @@ func (c *Client) Set(ctx context.Context, key Key, value []byte, opts SetOptions
 		ExpectedVersion:  opts.ExpectedVersion,
 	})
 	if err != nil {
-		return Record{}, err
+		return Record{}, fmt.Errorf("set nespa record: %w", err)
 	}
 	return recordFromWire(record), nil
 }
@@ -74,7 +77,7 @@ func (c *Client) Get(ctx context.Context, key Key, opts GetOptions) (Record, err
 		SpaceVersion:     opts.SpaceVersion,
 	})
 	if err != nil {
-		return Record{}, err
+		return Record{}, fmt.Errorf("get nespa record: %w", err)
 	}
 	return recordFromWire(record), nil
 }
@@ -85,7 +88,7 @@ func (c *Client) Delete(ctx context.Context, key Key, opts DeleteOptions) (bool,
 		ExpectedVersion: opts.ExpectedVersion,
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("delete nespa record: %w", err)
 	}
 	return response.Deleted, nil
 }
@@ -97,7 +100,7 @@ func (c *Client) Exists(ctx context.Context, key Key, opts GetOptions) (bool, er
 		SpaceVersion:     opts.SpaceVersion,
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("check nespa record: %w", err)
 	}
 	return response.Exists, nil
 }
@@ -111,7 +114,7 @@ func (c *Client) Touch(ctx context.Context, key Key, opts TouchOptions) (bool, e
 		ExpectedVersion:  opts.ExpectedVersion,
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("touch nespa record: %w", err)
 	}
 	return response.Touched, nil
 }
@@ -127,7 +130,7 @@ func (c *Client) Adjust(ctx context.Context, key Key, opts AdjustOptions) (Recor
 		ExpectedVersion:  opts.ExpectedVersion,
 	})
 	if err != nil {
-		return Record{}, err
+		return Record{}, fmt.Errorf("adjust nespa record: %w", err)
 	}
 	return recordFromWire(record), nil
 }
@@ -146,7 +149,7 @@ func (c *Client) BatchSet(ctx context.Context, items []SetItem) ([]Record, error
 	}
 	response, err := c.backend.BatchSet(ctx, cachewire.BatchSetRequest{Items: requests})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("batch set nespa records: %w", err)
 	}
 	return recordsFromWire(response.Records), nil
 }
@@ -162,7 +165,7 @@ func (c *Client) BatchGet(ctx context.Context, items []GetItem) ([]Record, error
 	}
 	response, err := c.backend.BatchGet(ctx, cachewire.BatchGetRequest{Items: requests})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("batch get nespa records: %w", err)
 	}
 	return recordsFromWire(response.Records), nil
 }
@@ -177,8 +180,8 @@ func ErrorCodeOf(err error) (ErrorCode, bool) {
 
 func recordsFromWire(records []cachewire.Record) []Record {
 	out := make([]Record, 0, len(records))
-	for _, record := range records {
-		out = append(out, recordFromWire(record))
+	for index := range records {
+		out = append(out, recordFromWire(records[index]))
 	}
 	return out
 }

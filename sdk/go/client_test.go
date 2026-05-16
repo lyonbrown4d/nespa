@@ -1,141 +1,147 @@
-package nespa
+package nespa_test
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/lyonbrown4d/nespa/cache"
+	"github.com/lyonbrown4d/nespa/cache/engine"
 	"github.com/lyonbrown4d/nespa/cachewire"
+	nespa "github.com/lyonbrown4d/nespa/sdk/go"
+	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
 )
 
-func TestClientSetMapsUserRequest(t *testing.T) {
-	backend := &fakeClient{
-		setRecord: cachewire.Record{
-			Found:            true,
-			Namespace:        "orders",
-			Space:            "session",
-			Entity:           "SessionView",
-			Key:              "k1",
-			Value:            []byte("stored"),
-			Version:          2,
-			NamespaceVersion: 3,
-			SpaceVersion:     4,
-			ExpireAtUnixMs:   1000,
-		},
-	}
-	sdk := &Client{backend: backend}
+func TestDirectClientSetGetDelete(t *testing.T) {
+	server := startSDKTCPServer(t)
+	sdk := newDirectClient(t, server)
+	key := nespa.Key{Namespace: "orders", Space: "session", Key: "direct-sdk"}
 
-	record, err := sdk.Set(context.Background(), Key{
-		Namespace: "orders",
-		Space:     "session",
-		Entity:    "SessionView",
-		Key:       "k1",
-	}, []byte("value"), SetOptions{
-		TTL:              1500 * time.Millisecond,
-		NamespaceVersion: 3,
-		SpaceVersion:     4,
-		ExpectedVersion:  1,
-	})
+	record, err := sdk.Set(t.Context(), key, []byte("value"), nespa.SetOptions{TTL: time.Second})
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	if backend.setRequest.TTLMillis != 1500 {
-		t.Fatalf("ttl millis = %d, want 1500", backend.setRequest.TTLMillis)
+	requireSDKRecord(t, record, "value")
+
+	record, err = sdk.Get(t.Context(), key, nespa.GetOptions{})
+	if err != nil {
+		t.Fatalf("get: %v", err)
 	}
-	if backend.setRequest.ExpectedVersion != 1 {
-		t.Fatalf("expected version = %d, want 1", backend.setRequest.ExpectedVersion)
+	requireSDKRecord(t, record, "value")
+
+	exists, err := sdk.Exists(t.Context(), key, nespa.GetOptions{})
+	if err != nil {
+		t.Fatalf("exists: %v", err)
 	}
-	if string(backend.setRequest.Value) != "value" {
-		t.Fatalf("value = %q, want value", backend.setRequest.Value)
+	if !exists {
+		t.Fatal("record should exist")
 	}
-	if !record.Found || record.Key.Namespace != "orders" || string(record.Value) != "stored" {
-		t.Fatalf("record = %+v", record)
+
+	deleted, err := sdk.Delete(t.Context(), key, nespa.DeleteOptions{})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
 	}
-	if record.ExpireAt != time.UnixMilli(1000) {
-		t.Fatalf("expire at = %v, want %v", record.ExpireAt, time.UnixMilli(1000))
+	if !deleted {
+		t.Fatal("record should be deleted")
 	}
 }
 
-func TestClientAdjustMapsUserRequest(t *testing.T) {
-	backend := &fakeClient{
-		adjustRecord: cachewire.Record{Found: true, Key: "counter", Value: []byte("12"), Version: 1},
-	}
-	sdk := &Client{backend: backend}
+func TestDirectClientAdjust(t *testing.T) {
+	server := startSDKTCPServer(t)
+	sdk := newDirectClient(t, server)
+	key := nespa.Key{Namespace: "orders", Space: "session", Key: "counter"}
 
-	record, err := sdk.Adjust(context.Background(), Key{Namespace: "n", Space: "s", Key: "counter"}, AdjustOptions{
-		InitialValue:    10,
-		Delta:           2,
-		ExpectedVersion: 7,
-	})
+	record, err := sdk.Adjust(t.Context(), key, nespa.AdjustOptions{InitialValue: 10, Delta: 2})
 	if err != nil {
-		t.Fatalf("adjust: %v", err)
+		t.Fatalf("adjust create: %v", err)
 	}
-	if backend.adjustRequest.InitialValue != 10 || backend.adjustRequest.Delta != 2 {
-		t.Fatalf("adjust request = %+v", backend.adjustRequest)
+	requireSDKRecord(t, record, "12")
+
+	record, err = sdk.Adjust(t.Context(), key, nespa.AdjustOptions{Delta: -3})
+	if err != nil {
+		t.Fatalf("adjust increment: %v", err)
 	}
-	if backend.adjustRequest.ExpectedVersion != 7 {
-		t.Fatalf("expected version = %d, want 7", backend.adjustRequest.ExpectedVersion)
+	requireSDKRecord(t, record, "9")
+}
+
+func TestDirectClientBatchGet(t *testing.T) {
+	server := startSDKTCPServer(t)
+	sdk := newDirectClient(t, server)
+	key := nespa.Key{Namespace: "orders", Space: "session", Key: "batch-sdk"}
+
+	records, err := sdk.BatchSet(t.Context(), []nespa.SetItem{{Key: key, Value: []byte("value")}})
+	if err != nil {
+		t.Fatalf("batch set: %v", err)
 	}
-	if string(record.Value) != "12" {
-		t.Fatalf("record value = %q, want 12", record.Value)
+	if len(records) != 1 {
+		t.Fatalf("batch set records = %d, want 1", len(records))
 	}
+
+	records, err = sdk.BatchGet(t.Context(), []nespa.GetItem{{Key: key}})
+	if err != nil {
+		t.Fatalf("batch get: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("batch get records = %d, want 1", len(records))
+	}
+	requireSDKRecord(t, records[0], "value")
 }
 
 func TestErrorCodeOf(t *testing.T) {
-	err := fmt.Errorf("wrapped: %w", cachewire.Error{Code: ErrorInvalidArgument, Message: "bad counter"})
+	err := fmt.Errorf("wrapped: %w", cachewire.Error{Code: nespa.ErrorInvalidArgument, Message: "bad counter"})
 
-	code, ok := ErrorCodeOf(err)
+	code, ok := nespa.ErrorCodeOf(err)
 	if !ok {
 		t.Fatal("expected wire error code")
 	}
-	if code != ErrorInvalidArgument {
-		t.Fatalf("code = %d, want %d", code, ErrorInvalidArgument)
+	if code != nespa.ErrorInvalidArgument {
+		t.Fatalf("code = %d, want %d", code, nespa.ErrorInvalidArgument)
 	}
 
-	if _, ok := ErrorCodeOf(errors.New("plain")); ok {
+	if _, ok := nespa.ErrorCodeOf(errors.New("plain")); ok {
 		t.Fatal("plain error should not expose a wire error code")
 	}
 }
 
-type fakeClient struct {
-	setRequest    cachewire.SetRequest
-	setRecord     cachewire.Record
-	adjustRequest cachewire.AdjustRequest
-	adjustRecord  cachewire.Record
+func newDirectClient(t *testing.T, server *cachetcp.Server) *nespa.Client {
+	t.Helper()
+	sdk, err := nespa.NewDirect(server.Addr())
+	if err != nil {
+		t.Fatalf("new direct: %v", err)
+	}
+	return sdk
 }
 
-func (f *fakeClient) Set(_ context.Context, request cachewire.SetRequest) (cachewire.Record, error) {
-	f.setRequest = request
-	return f.setRecord, nil
+func startSDKTCPServer(t *testing.T) *cachetcp.Server {
+	t.Helper()
+
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	t.Cleanup(func() {
+		if err := eng.Close(); err != nil {
+			t.Fatalf("close engine: %v", err)
+		}
+	})
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	if err := server.Start(t.Context(), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := server.Stop(ctx); err != nil {
+			t.Fatalf("stop tcp server: %v", err)
+		}
+	})
+	return server
 }
 
-func (f *fakeClient) Get(context.Context, cachewire.GetRequest) (cachewire.Record, error) {
-	return cachewire.Record{}, nil
-}
-
-func (f *fakeClient) Delete(context.Context, cachewire.DeleteRequest) (cachewire.DeleteResponse, error) {
-	return cachewire.DeleteResponse{}, nil
-}
-
-func (f *fakeClient) Exists(context.Context, cachewire.ExistsRequest) (cachewire.ExistsResponse, error) {
-	return cachewire.ExistsResponse{}, nil
-}
-
-func (f *fakeClient) Touch(context.Context, cachewire.TouchRequest) (cachewire.TouchResponse, error) {
-	return cachewire.TouchResponse{}, nil
-}
-
-func (f *fakeClient) Adjust(_ context.Context, request cachewire.AdjustRequest) (cachewire.Record, error) {
-	f.adjustRequest = request
-	return f.adjustRecord, nil
-}
-
-func (f *fakeClient) BatchSet(context.Context, cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
-	return cachewire.BatchSetResponse{}, nil
-}
-
-func (f *fakeClient) BatchGet(context.Context, cachewire.BatchGetRequest) (cachewire.BatchGetResponse, error) {
-	return cachewire.BatchGetResponse{}, nil
+func requireSDKRecord(t *testing.T, record nespa.Record, value string) {
+	t.Helper()
+	if !record.Found || string(record.Value) != value {
+		t.Fatalf("record = %+v, want value %q", record, value)
+	}
 }

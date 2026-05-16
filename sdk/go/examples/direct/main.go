@@ -1,3 +1,4 @@
+// Package main demonstrates direct TCP access through the Nespa Go SDK.
 package main
 
 import (
