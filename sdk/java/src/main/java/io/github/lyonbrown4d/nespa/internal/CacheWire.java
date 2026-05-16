@@ -2,11 +2,13 @@ package io.github.lyonbrown4d.nespa.internal;
 
 import io.github.lyonbrown4d.nespa.AdjustOptions;
 import io.github.lyonbrown4d.nespa.DeleteOptions;
+import io.github.lyonbrown4d.nespa.GetItem;
 import io.github.lyonbrown4d.nespa.GetOptions;
 import io.github.lyonbrown4d.nespa.Key;
 import io.github.lyonbrown4d.nespa.PrimitiveRequest;
 import io.github.lyonbrown4d.nespa.PrimitiveResult;
 import io.github.lyonbrown4d.nespa.Record;
+import io.github.lyonbrown4d.nespa.SetItem;
 import io.github.lyonbrown4d.nespa.SetOptions;
 import io.github.lyonbrown4d.nespa.TouchOptions;
 import java.io.ByteArrayOutputStream;
@@ -109,6 +111,22 @@ public final class CacheWire {
         boolean value = in.readBool();
         in.ensureEOF();
         return value;
+    }
+
+    public static WirePayload encodeBatchSetRequest(List<SetItem> items) {
+        return BatchWire.encodeSetRequest(items);
+    }
+
+    public static List<Record> decodeBatchSetResponse(byte[] metadata) {
+        return BatchWire.decodeRecords(metadata, new byte[0]);
+    }
+
+    public static byte[] encodeBatchGetRequest(List<GetItem> items) {
+        return BatchWire.encodeGetRequest(items);
+    }
+
+    public static List<Record> decodeBatchGetResponse(byte[] metadata, byte[] payload) {
+        return BatchWire.decodeRecords(metadata, payload);
     }
 
     public static WirePayload encodePrimitiveRequest(PrimitiveRequest request) {

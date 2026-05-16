@@ -30,11 +30,12 @@ The first Java surface is a direct TCP client for:
 - `exists`
 - `touch`
 - `adjust`
+- `batchSet`
+- `batchGet`
 - `primitive`
 - `batchPrimitive`
 
-`primitive` and `batchPrimitive` cover counter, map, set, and scored-set
-operations over the TCP binary protocol.
+Batch operations use the TCP binary batch protocol. `primitive` and
+`batchPrimitive` cover counter, map, set, and scored-set operations.
 
-General `batchSet` / `batchGet` helpers and routed control-plane clients are
-planned as the next layer.
+Routed control-plane clients are planned as the next layer.

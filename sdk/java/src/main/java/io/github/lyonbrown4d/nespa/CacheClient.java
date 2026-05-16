@@ -16,6 +16,10 @@ public interface CacheClient extends AutoCloseable {
 
     Record adjust(Key key, AdjustOptions options) throws IOException;
 
+    List<Record> batchSet(List<SetItem> items) throws IOException;
+
+    List<Record> batchGet(List<GetItem> items) throws IOException;
+
     PrimitiveResult primitive(PrimitiveRequest request) throws IOException;
 
     List<PrimitiveResult> batchPrimitive(List<PrimitiveRequest> requests) throws IOException;

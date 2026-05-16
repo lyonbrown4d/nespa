@@ -89,6 +89,19 @@ public class DirectCacheClient implements CacheClient {
     }
 
     @Override
+    public List<Record> batchSet(List<SetItem> items) throws IOException {
+        WirePayload wire = CacheWire.encodeBatchSetRequest(items);
+        Frame frame = send(Protocol.OP_CACHE_BATCH_SET, 0, wire.metadata(), wire.payload());
+        return CacheWire.decodeBatchSetResponse(frame.getMetadata());
+    }
+
+    @Override
+    public List<Record> batchGet(List<GetItem> items) throws IOException {
+        Frame frame = send(Protocol.OP_CACHE_BATCH_GET, 0, CacheWire.encodeBatchGetRequest(items), new byte[0]);
+        return CacheWire.decodeBatchGetResponse(frame.getMetadata(), frame.getPayload());
+    }
+
+    @Override
     public PrimitiveResult primitive(PrimitiveRequest request) throws IOException {
         WirePayload wire = CacheWire.encodePrimitiveRequest(request);
         Frame frame = send(Protocol.OP_CACHE_PRIMITIVE, 0, wire.metadata(), wire.payload());
