@@ -16,4 +16,5 @@ public class PrimitiveResult {
     @Builder.Default List<MapField> fields = List.of();
     @Builder.Default List<String> members = List.of();
     @Builder.Default List<ScoredMember> scoredMembers = List.of();
+    @Builder.Default List<byte[]> values = List.of();
 }

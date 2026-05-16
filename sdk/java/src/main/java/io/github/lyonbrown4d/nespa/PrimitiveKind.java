@@ -12,7 +12,12 @@ public enum PrimitiveKind {
     SET_MEMBERS(9),
     SCORED_SET_PUT(10),
     SCORED_SET_REMOVE(11),
-    SCORED_SET_RANGE(12);
+    SCORED_SET_RANGE(12),
+    LIST_PUSH_FRONT(13),
+    LIST_PUSH_BACK(14),
+    LIST_POP_FRONT(15),
+    LIST_POP_BACK(16),
+    LIST_RANGE(17);
 
     private final int code;
 

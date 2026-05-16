@@ -47,6 +47,10 @@ func TestClientServerBatchPrimitiveMixedOperations(t *testing.T) {
 			{Kind: cachewire.PrimitiveMapGet, Key: primitiveWireKey("profile"), Field: "name"},
 			{Kind: cachewire.PrimitiveSetContains, Key: primitiveWireKey("tags"), Member: "blue"},
 			{Kind: cachewire.PrimitiveScoredSetRange, Key: primitiveWireKey("rank")},
+			{Kind: cachewire.PrimitiveListPushBack, Key: primitiveWireKey("queue"), Value: []byte("middle")},
+			{Kind: cachewire.PrimitiveListPushFront, Key: primitiveWireKey("queue"), Value: []byte("first")},
+			{Kind: cachewire.PrimitiveListRange, Key: primitiveWireKey("queue")},
+			{Kind: cachewire.PrimitiveListPopFront, Key: primitiveWireKey("queue")},
 		},
 	})
 	if err != nil {
@@ -57,20 +61,38 @@ func TestClientServerBatchPrimitiveMixedOperations(t *testing.T) {
 
 func requireBatchPrimitive(t *testing.T, response cachewire.BatchPrimitiveResponse) {
 	t.Helper()
-	if len(response.Results) != 7 {
-		t.Fatalf("result len = %d, want 7", len(response.Results))
+	if len(response.Results) != 11 {
+		t.Fatalf("result len = %d, want 11", len(response.Results))
 	}
-	if string(response.Results[0].Value) != "1" {
-		t.Fatalf("counter result = %+v", response.Results[0])
+	requirePrimitiveScalarResults(t, response.Results)
+	requirePrimitiveListResults(t, response.Results)
+}
+
+func requirePrimitiveScalarResults(t *testing.T, results []cachewire.PrimitiveResult) {
+	t.Helper()
+	if string(results[0].Value) != "1" {
+		t.Fatalf("counter result = %+v", results[0])
 	}
-	if !response.Results[4].Found || string(response.Results[4].Value) != "alice" {
-		t.Fatalf("map get result = %+v", response.Results[4])
+	if !results[4].Found || string(results[4].Value) != "alice" {
+		t.Fatalf("map get result = %+v", results[4])
 	}
-	if !response.Results[5].Bool {
-		t.Fatalf("set contains result = %+v", response.Results[5])
+	if !results[5].Bool {
+		t.Fatalf("set contains result = %+v", results[5])
 	}
-	if len(response.Results[6].ScoredMembers) != 1 || response.Results[6].ScoredMembers[0].Member != "alice" {
-		t.Fatalf("scored range result = %+v", response.Results[6])
+	if len(results[6].ScoredMembers) != 1 || results[6].ScoredMembers[0].Member != "alice" {
+		t.Fatalf("scored range result = %+v", results[6])
+	}
+}
+
+func requirePrimitiveListResults(t *testing.T, results []cachewire.PrimitiveResult) {
+	t.Helper()
+	if len(results[9].Values) != 2 ||
+		string(results[9].Values[0].Value) != "first" ||
+		string(results[9].Values[1].Value) != "middle" {
+		t.Fatalf("list range result = %+v", results[9])
+	}
+	if string(results[10].Value) != "first" || results[10].Count != 1 {
+		t.Fatalf("list pop result = %+v", results[10])
 	}
 }
 

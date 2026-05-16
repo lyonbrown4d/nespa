@@ -5,6 +5,9 @@ func primitiveResultPayloadSize(result PrimitiveResult) int {
 	for index := range result.Fields {
 		total += len(result.Fields[index].Value)
 	}
+	for index := range result.Values {
+		total += len(result.Values[index].Value)
+	}
 	return total
 }
 

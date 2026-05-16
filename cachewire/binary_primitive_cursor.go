@@ -19,6 +19,7 @@ type primitiveNumbers struct {
 	minScore     float64
 	maxScore     float64
 	limit        uint64
+	start        int64
 }
 
 type payloadRange struct {
@@ -115,6 +116,7 @@ func buildPrimitiveRequest(
 		HasMinScore:      hasMin,
 		HasMaxScore:      hasMax,
 		Limit:            numbers.limit,
+		Start:            numbers.start,
 		Reverse:          reverse,
 		PayloadOffset:    valueRange.offset,
 		PayloadSize:      valueRange.size,
@@ -134,7 +136,8 @@ func appendPrimitiveNumbers(raw []byte, item PrimitiveRequest) []byte {
 	raw = appendFloat64(raw, item.Score)
 	raw = appendFloat64(raw, item.MinScore)
 	raw = appendFloat64(raw, item.MaxScore)
-	return appendUint64(raw, item.Limit)
+	raw = appendUint64(raw, item.Limit)
+	return appendInt64(raw, item.Start)
 }
 
 func (c *metadataCursor) readPrimitiveOptions() (primitiveOptions, error) {

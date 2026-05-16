@@ -65,6 +65,7 @@ final class PrimitiveWire {
         out.writeFloat64(request.getMinScore());
         out.writeFloat64(request.getMaxScore());
         out.writeUint64(request.getLimit());
+        out.writeInt64(request.getStart());
         out.writeBool(request.isHasMinScore());
         out.writeBool(request.isHasMaxScore());
         out.writeBool(request.isReverse());
@@ -82,6 +83,7 @@ final class PrimitiveWire {
         List<MapField> fields = readFields(in, payload);
         List<String> members = readMembers(in);
         List<ScoredMember> scoredMembers = readScoredMembers(in);
+        List<byte[]> values = readValues(in, payload);
         return PrimitiveResult.builder()
                 .record(record)
                 .found(found)
@@ -92,6 +94,7 @@ final class PrimitiveWire {
                 .fields(fields)
                 .members(members)
                 .scoredMembers(scoredMembers)
+                .values(values)
                 .build();
     }
 
@@ -151,6 +154,15 @@ final class PrimitiveWire {
                     .build());
         }
         return List.copyOf(members);
+    }
+
+    private static List<byte[]> readValues(CacheWire.Reader in, byte[] payload) {
+        int count = checkedCount(in.readUint64());
+        List<byte[]> values = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            values.add(readPayload(in, payload));
+        }
+        return List.copyOf(values);
     }
 
     private static byte[] readPayload(CacheWire.Reader in, byte[] payload) {

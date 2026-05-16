@@ -45,6 +45,34 @@ func runPrimitiveSmoke(ctx context.Context, routed *client.RoutedTCPClient, base
 		log.Fatalf("batch primitive result count = %d, want 2", len(batch.Results))
 	}
 	requirePrimitiveValue(batch.Results[1], value+"-batch", "batch primitive map get")
+	runListPrimitiveSmoke(ctx, routed, baseKey, value)
+}
+
+func runListPrimitiveSmoke(ctx context.Context, routed *client.RoutedTCPClient, baseKey cachewire.Key, value string) {
+	listKey := baseKey
+	listKey.Key += ":list"
+	response, err := routed.BatchPrimitive(ctx, cachewire.BatchPrimitiveRequest{
+		Items: []cachewire.PrimitiveRequest{
+			{Key: listKey, Kind: cachewire.PrimitiveListPushBack, Value: []byte(value + "-middle")},
+			{Key: listKey, Kind: cachewire.PrimitiveListPushFront, Value: []byte(value + "-first")},
+			{Key: listKey, Kind: cachewire.PrimitiveListRange},
+			{Key: listKey, Kind: cachewire.PrimitiveListPopFront},
+		},
+	})
+	if err != nil {
+		log.Fatalf("batch primitive list: %v", err)
+	}
+	if len(response.Results) != 4 {
+		log.Fatalf("list primitive result count = %d, want 4", len(response.Results))
+	}
+	if len(response.Results[2].Values) != 2 ||
+		string(response.Results[2].Values[0].Value) != value+"-first" ||
+		string(response.Results[2].Values[1].Value) != value+"-middle" {
+		log.Fatalf("list primitive range = %+v", response.Results[2])
+	}
+	if string(response.Results[3].Value) != value+"-first" || response.Results[3].Count != 1 {
+		log.Fatalf("list primitive pop = %+v", response.Results[3])
+	}
 }
 
 func runMultinodePrimitiveSmoke(

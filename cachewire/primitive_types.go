@@ -15,6 +15,11 @@ const (
 	PrimitiveScoredSetPut
 	PrimitiveScoredSetRemove
 	PrimitiveScoredSetRange
+	PrimitiveListPushFront
+	PrimitiveListPushBack
+	PrimitiveListPopFront
+	PrimitiveListPopBack
+	PrimitiveListRange
 )
 
 type PrimitiveRequest struct {
@@ -36,6 +41,7 @@ type PrimitiveRequest struct {
 	HasMinScore      bool          `json:"has_min_score,omitempty"`
 	HasMaxScore      bool          `json:"has_max_score,omitempty"`
 	Limit            uint64        `json:"limit,omitempty"`
+	Start            int64         `json:"start,omitempty"`
 	Reverse          bool          `json:"reverse,omitempty"`
 	PayloadOffset    uint32        `json:"payload_offset,omitempty"`
 	PayloadSize      uint32        `json:"payload_size,omitempty"`
@@ -51,6 +57,7 @@ type PrimitiveResult struct {
 	Fields        []MapField     `json:"fields,omitempty"`
 	Members       []string       `json:"members,omitempty"`
 	ScoredMembers []ScoredMember `json:"scored_members,omitempty"`
+	Values        []ListValue    `json:"values,omitempty"`
 	PayloadOffset uint32         `json:"payload_offset,omitempty"`
 	PayloadSize   uint32         `json:"payload_size,omitempty"`
 }
@@ -65,6 +72,12 @@ type MapField struct {
 type ScoredMember struct {
 	Member string  `json:"member"`
 	Score  float64 `json:"score"`
+}
+
+type ListValue struct {
+	Value         []byte `json:"-"`
+	PayloadOffset uint32 `json:"payload_offset,omitempty"`
+	PayloadSize   uint32 `json:"payload_size,omitempty"`
 }
 
 type BatchPrimitiveRequest struct {

@@ -20,6 +20,11 @@ var primitiveHandlers = map[PrimitiveKind]primitiveHandler{
 	PrimitiveScoredSetPut:    (*shardWorker).applyScoredSetPut,
 	PrimitiveScoredSetRemove: (*shardWorker).applyScoredSetRemove,
 	PrimitiveScoredSetRange:  (*shardWorker).applyScoredSetRange,
+	PrimitiveListPushFront:   (*shardWorker).applyListPushFront,
+	PrimitiveListPushBack:    (*shardWorker).applyListPushBack,
+	PrimitiveListPopFront:    (*shardWorker).applyListPopFront,
+	PrimitiveListPopBack:     (*shardWorker).applyListPopBack,
+	PrimitiveListRange:       (*shardWorker).applyListRange,
 }
 
 func (s *shardWorker) applyPrimitive(cmd shardCommand) shardResult {

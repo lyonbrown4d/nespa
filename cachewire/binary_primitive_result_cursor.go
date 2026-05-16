@@ -10,7 +10,8 @@ func appendPrimitiveResult(raw []byte, result PrimitiveResult) []byte {
 	raw = appendUint32(raw, result.PayloadSize)
 	raw = appendMapFields(raw, result.Fields)
 	raw = appendMembers(raw, result.Members)
-	return appendScoredMembers(raw, result.ScoredMembers)
+	raw = appendScoredMembers(raw, result.ScoredMembers)
+	return appendListValues(raw, result.Values)
 }
 
 func (c *metadataCursor) readPrimitiveResult() (PrimitiveResult, error) {
@@ -46,6 +47,10 @@ func (c *metadataCursor) readPrimitiveResultBody(
 	if err != nil {
 		return PrimitiveResult{}, err
 	}
+	values, err := c.readListValues()
+	if err != nil {
+		return PrimitiveResult{}, err
+	}
 	return PrimitiveResult{
 		Record:        record,
 		Found:         found,
@@ -55,6 +60,7 @@ func (c *metadataCursor) readPrimitiveResultBody(
 		Fields:        fields,
 		Members:       members,
 		ScoredMembers: scored,
+		Values:        values,
 		PayloadOffset: valueRange.offset,
 		PayloadSize:   valueRange.size,
 	}, nil
@@ -124,4 +130,32 @@ func (c *metadataCursor) readMapField() (MapField, error) {
 		return MapField{}, err
 	}
 	return MapField{Field: field, PayloadOffset: valueRange.offset, PayloadSize: valueRange.size}, nil
+}
+
+func appendListValues(raw []byte, values []ListValue) []byte {
+	raw = appendCount(raw, listValueCount(values))
+	for index := range values {
+		raw = appendUint32(raw, values[index].PayloadOffset)
+		raw = appendUint32(raw, values[index].PayloadSize)
+	}
+	return raw
+}
+
+func (c *metadataCursor) readListValues() ([]ListValue, error) {
+	count, err := c.readCount()
+	if err != nil {
+		return nil, err
+	}
+	values := make([]ListValue, 0, count)
+	for range count {
+		valueRange, readErr := c.readPayloadRange()
+		if readErr != nil {
+			return nil, readErr
+		}
+		values = append(values, ListValue{
+			PayloadOffset: valueRange.offset,
+			PayloadSize:   valueRange.size,
+		})
+	}
+	return values, nil
 }

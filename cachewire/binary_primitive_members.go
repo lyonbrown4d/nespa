@@ -100,3 +100,11 @@ func scoredMemberCount(items []ScoredMember) uint64 {
 	}
 	return count
 }
+
+func listValueCount(items []ListValue) uint64 {
+	var count uint64
+	for range items {
+		count++
+	}
+	return count
+}

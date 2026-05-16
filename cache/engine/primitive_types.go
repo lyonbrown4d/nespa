@@ -17,6 +17,11 @@ const (
 	PrimitiveScoredSetPut
 	PrimitiveScoredSetRemove
 	PrimitiveScoredSetRange
+	PrimitiveListPushFront
+	PrimitiveListPushBack
+	PrimitiveListPopFront
+	PrimitiveListPopBack
+	PrimitiveListRange
 )
 
 type PrimitiveOptions struct {
@@ -41,6 +46,7 @@ type PrimitiveRequest struct {
 	HasMinScore  bool
 	HasMaxScore  bool
 	Limit        uint64
+	Start        int64
 	Reverse      bool
 }
 
@@ -54,6 +60,7 @@ type PrimitiveResult struct {
 	Fields        []MapField
 	Members       []string
 	ScoredMembers []ScoredMember
+	Values        [][]byte
 }
 
 type WriteEstimate struct {
@@ -83,13 +90,18 @@ func (k PrimitiveKind) Mutates() bool {
 		PrimitiveSetAdd,
 		PrimitiveSetRemove,
 		PrimitiveScoredSetPut,
-		PrimitiveScoredSetRemove:
+		PrimitiveScoredSetRemove,
+		PrimitiveListPushFront,
+		PrimitiveListPushBack,
+		PrimitiveListPopFront,
+		PrimitiveListPopBack:
 		return true
 	case PrimitiveMapGet,
 		PrimitiveMapGetAll,
 		PrimitiveSetContains,
 		PrimitiveSetMembers,
-		PrimitiveScoredSetRange:
+		PrimitiveScoredSetRange,
+		PrimitiveListRange:
 		return false
 	}
 	return false

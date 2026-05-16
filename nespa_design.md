@@ -71,14 +71,15 @@ Nespa 第一阶段明确不做：
 - Map：`MapSet/MapGet/MapDelete/MapGetAll`；
 - Set：`SetAdd/SetRemove/SetContains/SetMembers`；
 - ScoredSet：`ScoredSetPut/ScoredSetRemove/ScoredSetRange`；
+- List：`ListPushFront/ListPushBack/ListPopFront/ListPopBack/ListRange`，列表元素保持二进制 value，不强制字符串化；
 - BatchPrimitive：一次请求承载多种 primitive op，降低用户心智负担和网络往返。
 
 边界：
 
 - 不提供 Redis 协议、Redis 命令名、Redis Cluster、RESP 或 Redis client 兼容；
-- 不在第一阶段实现 List/Stream/Bitmap/HyperLogLog/Geo 等扩展结构；
+- 不在第一阶段实现 Stream/Bitmap/HyperLogLog/Geo 等扩展结构；
 - primitive collection 仍绑定 `namespace/space/entity/key` 地址模型，并共享 TTL、ExpectedVersion、namespace/space version、route_epoch、quota admission 和 batch 语义；
-- collection 值在 DataNode 内部使用 `collectionx` 二进制序列化；外部仍通过 Nespa TCP frame 暴露稳定协议，不暴露内部编码。
+- collection 值在 DataNode 内部使用 `collectionx` 二进制序列化；外部仍通过 Nespa TCP frame 暴露稳定协议，不暴露内部编码。首版 ListRange 使用 `start + limit + reverse` 语义，不引入 Redis LRANGE 的负索引兼容。
 
 ### 2.2.2 当前迭代状态
 
@@ -491,7 +492,7 @@ github.com/arcgolabs/collectionx
 - Range / RangeSet / RangeMap
 - RingBuffer / PriorityQueue
 
-当前实现中，DataNode 基础 entry table、TTL、eviction 和 quota accounting 仍由 engine 自己管理；primitive Map/Set/ScoredSet 的集合表示与二进制序列化使用 `collectionx`，以避免手写容器和编码分叉。后续如果 primitive collection 成为极限热路径，再评估替换为专用结构。
+当前实现中，DataNode 基础 entry table、TTL、eviction 和 quota accounting 仍由 engine 自己管理；primitive Map/Set/ScoredSet/List 的集合表示与二进制序列化使用 `collectionx`，以避免手写容器和编码分叉。后续如果 primitive collection 成为极限热路径，再评估替换为专用结构。
 
 ### 5.11 客户端基础能力
 
@@ -1075,7 +1076,7 @@ Value 传输规则：
 
 - 单 key op：metadata 使用 binary codec 描述 key、ttl、version、found/deleted/touched 等字段，payload 传输 value bytes
 - batch set/get/delete/exists/touch：metadata 使用 binary codec 保存 item 列表；batch set/get 使用 payload_offset/payload_size，payload 拼接多个 value bytes
-- primitive op：metadata 描述 kind、field/member/score/range/version 等结构化参数，payload 传输 Map value 或 primitive result value
+- primitive op：metadata 描述 kind、field/member/score/range/list start/version 等结构化参数，payload 传输 Map value、List value 或 primitive result value
 - batch primitive：metadata 依次保存 primitive item 与 payload offset，payload 拼接所有 value bytes；routed SDK 发送前按 route 分组，响应按原请求顺序回填
 - batch 执行语义：第一阶段为单节点内顺序执行，不提供跨 key 原子性；若第 N 个 item 失败，服务端返回前 N-1 个已完成结果和错误，routed client 刷新 route 后只重试未发送/未完成的 route group
 - response 使用 flags 区分正常响应和协议错误；协议错误 frame 在 MVP 阶段仍使用 `cachewire.Error` JSON metadata
@@ -1975,6 +1976,7 @@ namespace flush by version bump
 sampled eviction
 Counter primitive op
 Map/Set/ScoredSet primitive ops
+List primitive ops
 BatchDelete/BatchExists/BatchTouch
 BatchPrimitive
 async primary-replica replication

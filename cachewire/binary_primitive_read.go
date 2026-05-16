@@ -38,6 +38,10 @@ func (c *metadataCursor) readPrimitiveNumbers() (primitiveNumbers, error) {
 	if err != nil {
 		return primitiveNumbers{}, err
 	}
+	start, err := c.readInt64()
+	if err != nil {
+		return primitiveNumbers{}, err
+	}
 	return primitiveNumbers{
 		delta:        delta,
 		initialValue: initialValue,
@@ -45,6 +49,7 @@ func (c *metadataCursor) readPrimitiveNumbers() (primitiveNumbers, error) {
 		minScore:     minScore,
 		maxScore:     maxScore,
 		limit:        limit,
+		start:        start,
 	}, nil
 }
 

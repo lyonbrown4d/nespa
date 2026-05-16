@@ -37,5 +37,8 @@ The SDK exposes stable cache operations:
 - `Primitive`
 - `BatchPrimitive`
 
+Primitive operations currently cover counter, map, set, scored set, and binary
+list values.
+
 Use `ErrorCodeOf(err)` to identify Nespa protocol errors such as
 `ErrorNoRoute` or `ErrorInvalidArgument`.

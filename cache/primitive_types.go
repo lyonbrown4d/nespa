@@ -22,4 +22,9 @@ const (
 	PrimitiveScoredSetPut    = engine.PrimitiveScoredSetPut
 	PrimitiveScoredSetRemove = engine.PrimitiveScoredSetRemove
 	PrimitiveScoredSetRange  = engine.PrimitiveScoredSetRange
+	PrimitiveListPushFront   = engine.PrimitiveListPushFront
+	PrimitiveListPushBack    = engine.PrimitiveListPushBack
+	PrimitiveListPopFront    = engine.PrimitiveListPopFront
+	PrimitiveListPopBack     = engine.PrimitiveListPopBack
+	PrimitiveListRange       = engine.PrimitiveListRange
 )

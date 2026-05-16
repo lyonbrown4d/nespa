@@ -30,6 +30,11 @@ func unpackPrimitiveResult(result PrimitiveResult, payload []byte) (PrimitiveRes
 		return PrimitiveResult{}, err
 	}
 	result.Fields = fields
+	values, err := unpackListValues(result.Values, payload)
+	if err != nil {
+		return PrimitiveResult{}, err
+	}
+	result.Values = values
 	return result, nil
 }
 
@@ -52,6 +57,10 @@ func appendPrimitiveResultPayload(result PrimitiveResult, payload []byte) (Primi
 		return PrimitiveResult{}, nil, err
 	}
 	result.Fields, payload, err = appendMapFieldsPayload(result.Fields, payload)
+	if err != nil {
+		return PrimitiveResult{}, nil, err
+	}
+	result.Values, payload, err = appendListValuesPayload(result.Values, payload)
 	if err != nil {
 		return PrimitiveResult{}, nil, err
 	}
@@ -105,6 +114,45 @@ func unpackMapFields(fields []MapField, payload []byte) ([]MapField, error) {
 		field := fields[index]
 		field.Value = value
 		out = append(out, field)
+	}
+	return out, nil
+}
+
+func appendListValuesPayload(values []ListValue, payload []byte) ([]ListValue, []byte, error) {
+	out := make([]ListValue, 0, len(values))
+	for index := range values {
+		item, nextPayload, err := appendListValuePayload(values[index], payload)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, item)
+		payload = nextPayload
+	}
+	return out, payload, nil
+}
+
+func appendListValuePayload(value ListValue, payload []byte) (ListValue, []byte, error) {
+	offset, size, err := checkedPayloadRange(len(payload), len(value.Value))
+	if err != nil {
+		return ListValue{}, nil, err
+	}
+	payload = append(payload, value.Value...)
+	value.PayloadOffset = offset
+	value.PayloadSize = size
+	value.Value = nil
+	return value, payload, nil
+}
+
+func unpackListValues(values []ListValue, payload []byte) ([]ListValue, error) {
+	out := make([]ListValue, 0, len(values))
+	for index := range values {
+		value, err := SlicePayload(payload, values[index].PayloadOffset, values[index].PayloadSize)
+		if err != nil {
+			return nil, err
+		}
+		item := values[index]
+		item.Value = value
+		out = append(out, item)
 	}
 	return out, nil
 }

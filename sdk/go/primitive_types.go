@@ -21,6 +21,11 @@ const (
 	PrimitiveScoredSetPut    = cachewire.PrimitiveScoredSetPut
 	PrimitiveScoredSetRemove = cachewire.PrimitiveScoredSetRemove
 	PrimitiveScoredSetRange  = cachewire.PrimitiveScoredSetRange
+	PrimitiveListPushFront   = cachewire.PrimitiveListPushFront
+	PrimitiveListPushBack    = cachewire.PrimitiveListPushBack
+	PrimitiveListPopFront    = cachewire.PrimitiveListPopFront
+	PrimitiveListPopBack     = cachewire.PrimitiveListPopBack
+	PrimitiveListRange       = cachewire.PrimitiveListRange
 )
 
 type PrimitiveOptions struct {
@@ -45,6 +50,7 @@ type PrimitiveRequest struct {
 	HasMinScore  bool
 	HasMaxScore  bool
 	Limit        uint64
+	Start        int64
 	Reverse      bool
 }
 
@@ -58,6 +64,7 @@ type PrimitiveResult struct {
 	Fields        []MapField
 	Members       []string
 	ScoredMembers []ScoredMember
+	Values        [][]byte
 }
 
 type MapField struct {

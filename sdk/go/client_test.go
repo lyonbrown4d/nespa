@@ -129,6 +129,10 @@ func TestDirectClientBatchPrimitive(t *testing.T) {
 		{Kind: nespa.PrimitiveMapGet, Key: sdkPrimitiveKey("profile"), Field: "name"},
 		{Kind: nespa.PrimitiveSetContains, Key: sdkPrimitiveKey("tags"), Member: "blue"},
 		{Kind: nespa.PrimitiveScoredSetRange, Key: sdkPrimitiveKey("rank")},
+		{Kind: nespa.PrimitiveListPushBack, Key: sdkPrimitiveKey("queue"), Value: []byte("middle")},
+		{Kind: nespa.PrimitiveListPushFront, Key: sdkPrimitiveKey("queue"), Value: []byte("first")},
+		{Kind: nespa.PrimitiveListRange, Key: sdkPrimitiveKey("queue")},
+		{Kind: nespa.PrimitiveListPopFront, Key: sdkPrimitiveKey("queue")},
 	})
 	if err != nil {
 		t.Fatalf("batch primitive: %v", err)
@@ -161,9 +165,15 @@ func TestErrorCodeOf(t *testing.T) {
 
 func requireSDKPrimitiveResults(t *testing.T, results []nespa.PrimitiveResult) {
 	t.Helper()
-	if len(results) != 7 {
-		t.Fatalf("primitive results len = %d, want 7", len(results))
+	if len(results) != 11 {
+		t.Fatalf("primitive results len = %d, want 11", len(results))
 	}
+	requireSDKPrimitiveScalarResults(t, results)
+	requireSDKPrimitiveListResults(t, results)
+}
+
+func requireSDKPrimitiveScalarResults(t *testing.T, results []nespa.PrimitiveResult) {
+	t.Helper()
 	if string(results[0].Value) != "1" {
 		t.Fatalf("counter result = %+v", results[0])
 	}
@@ -175,6 +185,18 @@ func requireSDKPrimitiveResults(t *testing.T, results []nespa.PrimitiveResult) {
 	}
 	if len(results[6].ScoredMembers) != 1 || results[6].ScoredMembers[0].Member != "alice" {
 		t.Fatalf("scored range result = %+v", results[6])
+	}
+}
+
+func requireSDKPrimitiveListResults(t *testing.T, results []nespa.PrimitiveResult) {
+	t.Helper()
+	if len(results[9].Values) != 2 ||
+		string(results[9].Values[0]) != "first" ||
+		string(results[9].Values[1]) != "middle" {
+		t.Fatalf("list range result = %+v", results[9])
+	}
+	if string(results[10].Value) != "first" || results[10].Count != 1 {
+		t.Fatalf("list pop result = %+v", results[10])
 	}
 }
 

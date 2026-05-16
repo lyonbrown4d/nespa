@@ -16,26 +16,36 @@ func validatePrimitiveRequest(request PrimitiveRequest) error {
 	return validatePrimitiveShape(request)
 }
 
+var primitiveValidators = map[PrimitiveKind]func(PrimitiveRequest) error{
+	PrimitiveCounterAdjust:   noPrimitiveShapeValidation,
+	PrimitiveMapSet:          requirePrimitiveField,
+	PrimitiveMapGet:          requirePrimitiveField,
+	PrimitiveMapDelete:       requirePrimitiveField,
+	PrimitiveMapGetAll:       noPrimitiveShapeValidation,
+	PrimitiveSetAdd:          requirePrimitiveMember,
+	PrimitiveSetRemove:       requirePrimitiveMember,
+	PrimitiveSetContains:     requirePrimitiveMember,
+	PrimitiveSetMembers:      noPrimitiveShapeValidation,
+	PrimitiveScoredSetPut:    validateScoredSetPut,
+	PrimitiveScoredSetRemove: requirePrimitiveMember,
+	PrimitiveScoredSetRange:  validateScoredSetRange,
+	PrimitiveListPushFront:   noPrimitiveShapeValidation,
+	PrimitiveListPushBack:    noPrimitiveShapeValidation,
+	PrimitiveListPopFront:    noPrimitiveShapeValidation,
+	PrimitiveListPopBack:     noPrimitiveShapeValidation,
+	PrimitiveListRange:       validateListRange,
+}
+
 func validatePrimitiveShape(request PrimitiveRequest) error {
-	switch request.Kind {
-	case PrimitiveCounterAdjust:
-		return nil
-	case PrimitiveMapSet, PrimitiveMapGet, PrimitiveMapDelete:
-		return requirePrimitiveField(request)
-	case PrimitiveMapGetAll:
-		return nil
-	case PrimitiveSetAdd, PrimitiveSetRemove, PrimitiveSetContains:
-		return requirePrimitiveMember(request)
-	case PrimitiveSetMembers:
-		return nil
-	case PrimitiveScoredSetPut:
-		return validateScoredSetPut(request)
-	case PrimitiveScoredSetRemove:
-		return requirePrimitiveMember(request)
-	case PrimitiveScoredSetRange:
-		return validateScoredSetRange(request)
+	validator, ok := primitiveValidators[request.Kind]
+	if !ok {
+		return primitiveValidationError(request.Kind, "unknown kind")
 	}
-	return primitiveValidationError(request.Kind, "unknown kind")
+	return validator(request)
+}
+
+func noPrimitiveShapeValidation(PrimitiveRequest) error {
+	return nil
 }
 
 func requirePrimitiveField(request PrimitiveRequest) error {
@@ -77,6 +87,13 @@ func validateScoredSetRange(request PrimitiveRequest) error {
 
 func invalidFloat(value float64) bool {
 	return math.IsNaN(value) || math.IsInf(value, 0)
+}
+
+func validateListRange(request PrimitiveRequest) error {
+	if request.Start < 0 {
+		return primitiveValidationError(request.Kind, "start must be non-negative")
+	}
+	return nil
 }
 
 func primitiveValidationError(kind PrimitiveKind, reason string) error {

@@ -21,6 +21,7 @@ func primitiveRequestFromWire(request cachewire.PrimitiveRequest) cache.Primitiv
 		HasMinScore:  request.HasMinScore,
 		HasMaxScore:  request.HasMaxScore,
 		Limit:        request.Limit,
+		Start:        request.Start,
 		Reverse:      request.Reverse,
 	}
 }
@@ -53,6 +54,7 @@ func primitiveResultFromCache(result cache.PrimitiveResult) cachewire.PrimitiveR
 		Fields:        mapFieldsFromCache(result.Fields),
 		Members:       append([]string(nil), result.Members...),
 		ScoredMembers: scoredMembersFromCache(result.ScoredMembers),
+		Values:        listValuesFromCache(result.Values),
 	}
 }
 
@@ -84,4 +86,12 @@ func scoredMembersFromCache(items []cache.ScoredMember) []cachewire.ScoredMember
 		})
 	}
 	return members
+}
+
+func listValuesFromCache(items [][]byte) []cachewire.ListValue {
+	values := make([]cachewire.ListValue, 0, len(items))
+	for index := range items {
+		values = append(values, cachewire.ListValue{Value: items[index]})
+	}
+	return values
 }

@@ -42,8 +42,11 @@ func (s *shardWorker) applyPrimitiveEstimate(cmd shardCommand) shardResult {
 		return s.estimateSetPrimitive(cmd)
 	case PrimitiveScoredSetPut, PrimitiveScoredSetRemove:
 		return s.estimateScoredSetPrimitive(cmd)
+	case PrimitiveListPushFront, PrimitiveListPushBack,
+		PrimitiveListPopFront, PrimitiveListPopBack:
+		return s.estimateListPrimitive(cmd)
 	case PrimitiveMapGet, PrimitiveMapGetAll, PrimitiveSetContains,
-		PrimitiveSetMembers, PrimitiveScoredSetRange:
+		PrimitiveSetMembers, PrimitiveScoredSetRange, PrimitiveListRange:
 		return shardResult{estimate: PrimitiveEstimate{Key: cmd.key}}
 	}
 	return shardResult{err: primitiveValidationError(cmd.primitive.Kind, "unknown kind")}

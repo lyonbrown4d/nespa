@@ -21,5 +21,6 @@ public class PrimitiveRequest {
     boolean hasMinScore;
     boolean hasMaxScore;
     long limit;
+    long start;
     boolean reverse;
 }

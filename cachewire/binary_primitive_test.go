@@ -28,6 +28,7 @@ func TestBinaryPrimitiveRequestRoundTrip(t *testing.T) {
 		HasMinScore:      true,
 		HasMaxScore:      true,
 		Limit:            3,
+		Start:            1,
 		Reverse:          true,
 	}
 
@@ -58,6 +59,10 @@ func TestBinaryPrimitiveResponseRoundTrip(t *testing.T) {
 		ScoredMembers: []cachewire.ScoredMember{
 			{Member: "alice", Score: 2},
 			{Member: "bob", Score: 3},
+		},
+		Values: []cachewire.ListValue{
+			{Value: []byte("first")},
+			{Value: []byte("second")},
 		},
 	}
 
@@ -129,10 +134,27 @@ func assertPrimitiveResult(t *testing.T, got, want cachewire.PrimitiveResult) {
 	if !bytes.Equal(got.Value, want.Value) || len(got.Fields) != len(want.Fields) {
 		t.Fatalf("primitive result payload = %+v, want %+v", got, want)
 	}
-	for index := range want.Fields {
-		if got.Fields[index].Field != want.Fields[index].Field ||
-			!bytes.Equal(got.Fields[index].Value, want.Fields[index].Value) {
-			t.Fatalf("field[%d] = %+v, want %+v", index, got.Fields[index], want.Fields[index])
+	assertPrimitiveFields(t, got.Fields, want.Fields)
+	assertPrimitiveValues(t, got.Values, want.Values)
+}
+
+func assertPrimitiveFields(t *testing.T, got, want []cachewire.MapField) {
+	t.Helper()
+	for index := range want {
+		if got[index].Field != want[index].Field || !bytes.Equal(got[index].Value, want[index].Value) {
+			t.Fatalf("field[%d] = %+v, want %+v", index, got[index], want[index])
+		}
+	}
+}
+
+func assertPrimitiveValues(t *testing.T, got, want []cachewire.ListValue) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("values len = %d, want %d", len(got), len(want))
+	}
+	for index := range want {
+		if !bytes.Equal(got[index].Value, want[index].Value) {
+			t.Fatalf("value[%d] = %q, want %q", index, got[index].Value, want[index].Value)
 		}
 	}
 }

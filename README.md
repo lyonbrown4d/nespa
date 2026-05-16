@@ -196,7 +196,8 @@ replication are not implemented in this stage.
 
 The data plane is intentionally a versioned binary KV and primitive collection
 plane. It supports `set/get/delete/exists/touch/adjust`, batch variants, and a
-small native primitive set for `counter`, `map`, `set`, and `scored set`.
+small native primitive set for `counter`, `map`, `set`, `scored set`, and
+binary `list` values.
 Redis protocol, command, and cluster compatibility are not part of this stage.
 
 The public TCP client SDK lives in `client` and uses `transport/tcp` underneath.

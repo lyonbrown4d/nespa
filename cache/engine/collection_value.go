@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 
+	collectionlist "github.com/arcgolabs/collectionx/list"
 	collectionmapping "github.com/arcgolabs/collectionx/mapping"
 	collectionset "github.com/arcgolabs/collectionx/set"
 	"github.com/samber/oops"
@@ -14,6 +15,7 @@ const (
 	collectionKindMap collectionKind = iota + 1
 	collectionKindSet
 	collectionKindScoredSet
+	collectionKindList
 )
 
 var collectionValuePrefix = []byte{'n', 's', 'p', 'a', 'c', '1'}
@@ -76,6 +78,26 @@ func decodeScoredSetCollection(raw []byte) (*collectionmapping.Map[string, float
 		return nil, collectionSerializationError("decode scored set collection", err)
 	}
 	return scores, nil
+}
+
+func encodeListCollection(values *collectionlist.List[[]byte]) ([]byte, error) {
+	body, err := values.MarshalBinary()
+	if err != nil {
+		return nil, collectionSerializationError("encode list collection", err)
+	}
+	return encodeCollectionBody(collectionKindList, body), nil
+}
+
+func decodeListCollection(raw []byte) (*collectionlist.List[[]byte], error) {
+	body, err := decodeCollectionBody(raw, collectionKindList)
+	if err != nil {
+		return nil, err
+	}
+	values := collectionlist.NewList[[]byte]()
+	if err := values.UnmarshalBinary(body); err != nil {
+		return nil, collectionSerializationError("decode list collection", err)
+	}
+	return values, nil
 }
 
 func encodeCollectionBody(kind collectionKind, body []byte) []byte {

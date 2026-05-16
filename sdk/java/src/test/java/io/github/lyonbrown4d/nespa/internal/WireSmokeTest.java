@@ -39,6 +39,7 @@ public final class WireSmokeTest {
         require(Arrays.equals(result.getFields().getFirst().getValue(), FIELD_VALUE), "primitive field value mismatch");
         require(result.getMembers().contains("blue"), "primitive member missing");
         require(result.getScoredMembers().getFirst().getScore() == 42.0, "primitive score mismatch");
+        require(result.getValues().isEmpty(), "primitive list values should be empty");
     }
 
     private static void smokeBatchPrimitiveRequest() {
@@ -68,6 +69,7 @@ public final class WireSmokeTest {
                 .key(Key.builder().namespace("orders").space("session").key(key).build())
                 .field("name")
                 .value(value)
+                .start(1)
                 .options(io.github.lyonbrown4d.nespa.PrimitiveOptions.builder()
                         .ttl(Duration.ofSeconds(5))
                         .namespaceVersion(7)
@@ -104,6 +106,7 @@ public final class WireSmokeTest {
         out.writeUint64(1);
         out.writeString("alice");
         out.writeFloat64(42.0);
+        out.writeUint64(0);
     }
 
     private static void writeRecord(CacheWire.Writer out, String key) {
