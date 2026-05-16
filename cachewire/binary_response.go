@@ -76,15 +76,7 @@ func decodeVersionedKey(raw []byte) (Key, uint64, uint64, error) {
 	if err != nil {
 		return Key{}, 0, 0, err
 	}
-	key, err := cursor.readKey()
-	if err != nil {
-		return Key{}, 0, 0, err
-	}
-	namespaceVersion, err := cursor.readUint64()
-	if err != nil {
-		return Key{}, 0, 0, err
-	}
-	spaceVersion, err := cursor.readUint64()
+	key, namespaceVersion, spaceVersion, err := cursor.readVersionedKey()
 	if err != nil {
 		return Key{}, 0, 0, err
 	}

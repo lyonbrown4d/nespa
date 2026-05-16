@@ -23,6 +23,9 @@ type rawClient interface {
 	Primitive(context.Context, cachewire.PrimitiveRequest) (cachewire.PrimitiveResult, error)
 	BatchSet(context.Context, cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error)
 	BatchGet(context.Context, cachewire.BatchGetRequest) (cachewire.BatchGetResponse, error)
+	BatchDelete(context.Context, cachewire.BatchDeleteRequest) (cachewire.BatchDeleteResponse, error)
+	BatchExists(context.Context, cachewire.BatchExistsRequest) (cachewire.BatchExistsResponse, error)
+	BatchTouch(context.Context, cachewire.BatchTouchRequest) (cachewire.BatchTouchResponse, error)
 	BatchPrimitive(context.Context, cachewire.BatchPrimitiveRequest) (cachewire.BatchPrimitiveResponse, error)
 }
 
@@ -172,6 +175,55 @@ func (c *Client) BatchGet(ctx context.Context, items []GetItem) ([]Record, error
 	return recordsFromWire(response.Records), nil
 }
 
+func (c *Client) BatchDelete(ctx context.Context, items []DeleteItem) ([]bool, error) {
+	requests := make([]cachewire.DeleteRequest, 0, len(items))
+	for _, item := range items {
+		requests = append(requests, cachewire.DeleteRequest{
+			Key:             wireKey(item.Key),
+			ExpectedVersion: item.Options.ExpectedVersion,
+		})
+	}
+	response, err := c.backend.BatchDelete(ctx, cachewire.BatchDeleteRequest{Items: requests})
+	if err != nil {
+		return nil, fmt.Errorf("batch delete nespa records: %w", err)
+	}
+	return deleteResultsFromWire(response.Results), nil
+}
+
+func (c *Client) BatchExists(ctx context.Context, items []GetItem) ([]bool, error) {
+	requests := make([]cachewire.ExistsRequest, 0, len(items))
+	for _, item := range items {
+		requests = append(requests, cachewire.ExistsRequest{
+			Key:              wireKey(item.Key),
+			NamespaceVersion: item.Options.NamespaceVersion,
+			SpaceVersion:     item.Options.SpaceVersion,
+		})
+	}
+	response, err := c.backend.BatchExists(ctx, cachewire.BatchExistsRequest{Items: requests})
+	if err != nil {
+		return nil, fmt.Errorf("batch check nespa records: %w", err)
+	}
+	return existsResultsFromWire(response.Results), nil
+}
+
+func (c *Client) BatchTouch(ctx context.Context, items []TouchItem) ([]bool, error) {
+	requests := make([]cachewire.TouchRequest, 0, len(items))
+	for _, item := range items {
+		requests = append(requests, cachewire.TouchRequest{
+			Key:              wireKey(item.Key),
+			TTLMillis:        ttlMillis(item.Options.TTL),
+			NamespaceVersion: item.Options.NamespaceVersion,
+			SpaceVersion:     item.Options.SpaceVersion,
+			ExpectedVersion:  item.Options.ExpectedVersion,
+		})
+	}
+	response, err := c.backend.BatchTouch(ctx, cachewire.BatchTouchRequest{Items: requests})
+	if err != nil {
+		return nil, fmt.Errorf("batch touch nespa records: %w", err)
+	}
+	return touchResultsFromWire(response.Results), nil
+}
+
 func ErrorCodeOf(err error) (ErrorCode, bool) {
 	var wireErr cachewire.Error
 	if errors.As(err, &wireErr) {
@@ -184,6 +236,30 @@ func recordsFromWire(records []cachewire.Record) []Record {
 	out := make([]Record, 0, len(records))
 	for index := range records {
 		out = append(out, recordFromWire(records[index]))
+	}
+	return out
+}
+
+func deleteResultsFromWire(results []cachewire.DeleteResponse) []bool {
+	out := make([]bool, 0, len(results))
+	for index := range results {
+		out = append(out, results[index].Deleted)
+	}
+	return out
+}
+
+func existsResultsFromWire(results []cachewire.ExistsResponse) []bool {
+	out := make([]bool, 0, len(results))
+	for index := range results {
+		out = append(out, results[index].Exists)
+	}
+	return out
+}
+
+func touchResultsFromWire(results []cachewire.TouchResponse) []bool {
+	out := make([]bool, 0, len(results))
+	for index := range results {
+		out = append(out, results[index].Touched)
 	}
 	return out
 }

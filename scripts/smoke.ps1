@@ -11,7 +11,9 @@ param(
     [string]$Entity = "SessionView",
     [string]$Key = "smoke:1",
     [string]$Value = "nespa-smoke",
-    [int]$HeartbeatMs = 500
+    [int]$HeartbeatMs = 500,
+    [string]$QuotaSmokeEnabled = "true",
+    [uint64]$NodeQuotaSpaceMemoryBytes = 1048576
 )
 
 $ErrorActionPreference = "Stop"
@@ -120,13 +122,15 @@ function Wait-SnapshotReady {
 }
 
 function Invoke-SmokeClient {
+    $quotaSmoke = if ($script:quotaSmokeEnabled) { "true" } else { "false" }
     Invoke-Native -FilePath $clientExe -Arguments @(
         "-control-addr", $ControlAddr,
         "-namespace", $Namespace,
         "-space", $Space,
         "-entity", $Entity,
         "-key", $Key,
-        "-value", $Value
+        "-value", $Value,
+        "-quota-smoke", $quotaSmoke
     )
 }
 
@@ -137,6 +141,7 @@ Write-Host "build server and client"
     Invoke-Native -FilePath "go" -Arguments @("build", "-o", $clientExe, "./scripts/smoke")
     $frontendEnabled = Parse-Bool -Value $FrontendEnabled -Name "FrontendEnabled"
     $adminEnabled = Parse-Bool -Value $AdminEnabled -Name "AdminEnabled"
+    $script:quotaSmokeEnabled = Parse-Bool -Value $QuotaSmokeEnabled -Name "QuotaSmokeEnabled"
 
     Write-Host "start server"
     $frontendEnabledArg = if ($frontendEnabled) { "true" } else { "false" }
@@ -154,6 +159,9 @@ Write-Host "build server and client"
         "--admin-enabled=$adminEnabledArg",
         "--admin-addr", $AdminAddr
     )
+    if ($script:quotaSmokeEnabled) {
+        $serverArgs += @("--node-quota-space-memory-bytes", "$NodeQuotaSpaceMemoryBytes")
+    }
     $server = Start-Process -FilePath $serverExe -ArgumentList $serverArgs -RedirectStandardOutput $serverLog -RedirectStandardError "$workDir\\server.err" -PassThru
 
     try {

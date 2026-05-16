@@ -90,6 +90,33 @@ func TestDirectClientBatchGet(t *testing.T) {
 	requireSDKRecord(t, records[0], "value")
 }
 
+func TestDirectClientBatchDeleteExistsTouch(t *testing.T) {
+	server := startSDKTCPServer(t)
+	sdk := newDirectClient(t, server)
+	key := nespa.Key{Namespace: "orders", Space: "session", Key: "batch-more-sdk"}
+
+	if _, err := sdk.BatchSet(t.Context(), []nespa.SetItem{{Key: key, Value: []byte("value")}}); err != nil {
+		t.Fatalf("batch set: %v", err)
+	}
+	exists, err := sdk.BatchExists(t.Context(), []nespa.GetItem{{Key: key}})
+	if err != nil {
+		t.Fatalf("batch exists: %v", err)
+	}
+	requireSDKBoolResults(t, exists, true, "batch exists")
+
+	touched, err := sdk.BatchTouch(t.Context(), []nespa.TouchItem{{Key: key, Options: nespa.TouchOptions{TTL: time.Second}}})
+	if err != nil {
+		t.Fatalf("batch touch: %v", err)
+	}
+	requireSDKBoolResults(t, touched, true, "batch touch")
+
+	deleted, err := sdk.BatchDelete(t.Context(), []nespa.DeleteItem{{Key: key}})
+	if err != nil {
+		t.Fatalf("batch delete: %v", err)
+	}
+	requireSDKBoolResults(t, deleted, true, "batch delete")
+}
+
 func TestDirectClientBatchPrimitive(t *testing.T) {
 	server := startSDKTCPServer(t)
 	sdk := newDirectClient(t, server)
@@ -107,6 +134,13 @@ func TestDirectClientBatchPrimitive(t *testing.T) {
 		t.Fatalf("batch primitive: %v", err)
 	}
 	requireSDKPrimitiveResults(t, results)
+}
+
+func requireSDKBoolResults(t *testing.T, results []bool, want bool, name string) {
+	t.Helper()
+	if len(results) != 1 || results[0] != want {
+		t.Fatalf("%s results = %+v, want [%v]", name, results, want)
+	}
 }
 
 func TestErrorCodeOf(t *testing.T) {

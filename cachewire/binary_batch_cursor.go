@@ -60,6 +60,56 @@ func (c *metadataCursor) readBatchGetItem() (GetRequest, error) {
 	}, nil
 }
 
+func (c *metadataCursor) readBatchDeleteItem() (DeleteRequest, error) {
+	key, err := c.readKey()
+	if err != nil {
+		return DeleteRequest{}, err
+	}
+	expectedVersion, err := c.readUint64()
+	if err != nil {
+		return DeleteRequest{}, err
+	}
+	return DeleteRequest{Key: key, ExpectedVersion: expectedVersion}, nil
+}
+
+func (c *metadataCursor) readBatchExistsItem() (ExistsRequest, error) {
+	key, namespaceVersion, spaceVersion, err := c.readVersionedKey()
+	if err != nil {
+		return ExistsRequest{}, err
+	}
+	return ExistsRequest{Key: key, NamespaceVersion: namespaceVersion, SpaceVersion: spaceVersion}, nil
+}
+
+func (c *metadataCursor) readBatchTouchItem() (TouchRequest, error) {
+	key, err := c.readKey()
+	if err != nil {
+		return TouchRequest{}, err
+	}
+	ttlMillis, err := c.readInt64()
+	if err != nil {
+		return TouchRequest{}, err
+	}
+	namespaceVersion, err := c.readUint64()
+	if err != nil {
+		return TouchRequest{}, err
+	}
+	spaceVersion, err := c.readUint64()
+	if err != nil {
+		return TouchRequest{}, err
+	}
+	expectedVersion, err := c.readUint64()
+	if err != nil {
+		return TouchRequest{}, err
+	}
+	return TouchRequest{
+		Key:              key,
+		TTLMillis:        ttlMillis,
+		NamespaceVersion: namespaceVersion,
+		SpaceVersion:     spaceVersion,
+		ExpectedVersion:  expectedVersion,
+	}, nil
+}
+
 func (c *metadataCursor) readBatchRecord() (Record, error) {
 	found, err := c.readBool()
 	if err != nil {

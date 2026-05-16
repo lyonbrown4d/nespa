@@ -81,6 +81,16 @@ type GetItem struct {
 	Options GetOptions
 }
 
+type DeleteItem struct {
+	Key     Key
+	Options DeleteOptions
+}
+
+type TouchItem struct {
+	Key     Key
+	Options TouchOptions
+}
+
 func wireKey(key Key) cachewire.Key {
 	return cachewire.Key{
 		Namespace: key.Namespace,

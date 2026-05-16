@@ -132,6 +132,22 @@ func (c *metadataCursor) readKey() (Key, error) {
 	return Key{Namespace: namespace, Space: space, Entity: entity, Key: key}, nil
 }
 
+func (c *metadataCursor) readVersionedKey() (Key, uint64, uint64, error) {
+	key, err := c.readKey()
+	if err != nil {
+		return Key{}, 0, 0, err
+	}
+	namespaceVersion, err := c.readUint64()
+	if err != nil {
+		return Key{}, 0, 0, err
+	}
+	spaceVersion, err := c.readUint64()
+	if err != nil {
+		return Key{}, 0, 0, err
+	}
+	return key, namespaceVersion, spaceVersion, nil
+}
+
 func (c *metadataCursor) readString() (string, error) {
 	size, count := binary.Uvarint(c.raw[c.pos:])
 	if count <= 0 {

@@ -56,6 +56,15 @@ type PrimitiveResult struct {
 	ScoredMembers []ScoredMember
 }
 
+type WriteEstimate struct {
+	Key          Key
+	Applied      bool
+	OldCostBytes uint64
+	NewCostBytes uint64
+}
+
+type PrimitiveEstimate = WriteEstimate
+
 type MapField struct {
 	Field string
 	Value []byte

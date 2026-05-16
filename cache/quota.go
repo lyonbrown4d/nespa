@@ -12,15 +12,84 @@ func (s *EngineService) hasQuotaLimits() bool {
 		len(s.quota.Namespaces) > 0 || len(s.quota.Spaces) > 0
 }
 
-func (s *EngineService) currentCost(ctx context.Context, key Key) (uint64, error) {
+func (s *EngineService) currentRecord(ctx context.Context, key Key) (Record, bool, error) {
 	current, found, err := s.engine.Get(ctx, key, engine.GetOptions{})
 	if err != nil {
-		return 0, fmt.Errorf("get engine record for admission: %w", err)
+		return Record{}, false, fmt.Errorf("get engine record for admission: %w", err)
 	}
-	if !found {
-		return 0, nil
+	return current, found, nil
+}
+
+func (s *EngineService) admitSet(ctx context.Context, key Key, value []byte, opts SetOptions) error {
+	if !s.hasQuotaLimits() {
+		return nil
 	}
-	return current.CostBytes, nil
+
+	nextCost := engine.EstimateCost(key, value)
+	current, found, err := s.currentRecord(ctx, key)
+	if err != nil {
+		return err
+	}
+	if !expectedVersionWillApply(found, current.Version, opts.ExpectedVersion) {
+		return nil
+	}
+	return s.admitCostGrowth(ctx, key, current.CostBytes, nextCost)
+}
+
+func (s *EngineService) admitAdjust(ctx context.Context, key Key, opts AdjustOptions) error {
+	if !s.hasQuotaLimits() {
+		return nil
+	}
+
+	estimate, err := s.engine.EstimateAdjust(ctx, key, engine.AdjustOptions{
+		Delta:            opts.Delta,
+		InitialValue:     opts.InitialValue,
+		TTL:              opts.TTL,
+		NamespaceVersion: opts.NamespaceVersion,
+		SpaceVersion:     opts.SpaceVersion,
+		ExpectedVersion:  opts.ExpectedVersion,
+	})
+	if err != nil {
+		return fmt.Errorf("estimate engine adjust for admission: %w", err)
+	}
+	if !estimate.Applied {
+		return nil
+	}
+	return s.admitCostGrowth(ctx, key, estimate.OldCostBytes, estimate.NewCostBytes)
+}
+
+func (s *EngineService) admitPrimitive(ctx context.Context, request PrimitiveRequest) error {
+	if !s.hasQuotaLimits() || !request.Kind.Mutates() {
+		return nil
+	}
+
+	estimate, err := s.engine.EstimatePrimitive(ctx, request)
+	if err != nil {
+		return fmt.Errorf("estimate engine primitive for admission: %w", err)
+	}
+	if !estimate.Applied {
+		return nil
+	}
+	return s.admitCostGrowth(ctx, request.Key, estimate.OldCostBytes, estimate.NewCostBytes)
+}
+
+func (s *EngineService) admitCostGrowth(ctx context.Context, key Key, oldCost, nextCost uint64) error {
+	if nextCost <= oldCost {
+		return nil
+	}
+	delta := nextCost - oldCost
+
+	stats, err := s.engine.Stats(ctx)
+	if err != nil {
+		return fmt.Errorf("read engine stats for admission: %w", err)
+	}
+	nsUsage, spaceUsage := usageFor(stats, key.Namespace, key.Space)
+
+	nsUsage, _, err = s.ensureSpaceQuota(ctx, key, nsUsage, spaceUsage, delta)
+	if err != nil {
+		return err
+	}
+	return s.ensureNamespaceQuota(key, nsUsage, delta)
 }
 
 func (s *EngineService) ensureSpaceQuota(ctx context.Context, key Key, nsUsage, spaceUsage, delta uint64) (uint64, uint64, error) {
@@ -86,4 +155,8 @@ func minUint64(a, b uint64) uint64 {
 		return a
 	}
 	return b
+}
+
+func expectedVersionWillApply(found bool, version, expected uint64) bool {
+	return expected == 0 || found && version == expected
 }

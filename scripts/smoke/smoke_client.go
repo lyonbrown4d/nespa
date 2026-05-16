@@ -28,6 +28,7 @@ func main() {
 	entity := flag.String("entity", "", "cache entity (optional)")
 	key := flag.String("key", "smoke:1", "cache key")
 	value := flag.String("value", "nespa-smoke", "cache value")
+	quotaSmoke := flag.Bool("quota-smoke", false, "verify quota rejection with a large write")
 	flag.Parse()
 
 	cacheKey := cachewire.Key{
@@ -40,7 +41,7 @@ func main() {
 	ctx := context.Background()
 	switch *mode {
 	case "single":
-		runSingle(ctx, *controlAddr, cacheKey, *value)
+		runSingle(ctx, *controlAddr, cacheKey, *value, *quotaSmoke)
 	case "multinode":
 		runMultinode(ctx, *controlAddr, cacheKey, *value)
 	case "shrink":
@@ -50,7 +51,7 @@ func main() {
 	}
 }
 
-func runSingle(ctx context.Context, controlAddr string, cacheKey cachewire.Key, value string) {
+func runSingle(ctx context.Context, controlAddr string, cacheKey cachewire.Key, value string, quotaSmoke bool) {
 	routed := newRouted(controlAddr)
 	if _, setErr := routed.Set(ctx, cachewire.SetRequest{
 		Key:   cacheKey,
@@ -69,12 +70,35 @@ func runSingle(ctx context.Context, controlAddr string, cacheKey cachewire.Key, 
 	if string(record.Value) != value {
 		log.Fatalf("value mismatch: got=%q want=%q", string(record.Value), value)
 	}
+	runPrimitiveSmoke(ctx, routed, cacheKey, value)
+	if quotaSmoke {
+		runQuotaSmoke(ctx, routed, cacheKey)
+		reseedAfterQuotaSmoke(ctx, routed, cacheKey, value)
+	}
 
 	if _, err := fmt.Fprintln(os.Stdout, "routed tcp set/get ok"); err != nil {
 		log.Fatalf("write smoke output: %v", err)
 	}
 	if _, err := fmt.Fprintln(os.Stdout, "smoke ok"); err != nil {
 		log.Fatalf("write smoke output: %v", err)
+	}
+}
+
+func reseedAfterQuotaSmoke(ctx context.Context, routed *client.RoutedTCPClient, baseKey cachewire.Key, value string) {
+	reseedKey := baseKey
+	reseedKey.Key += ":post-quota"
+	if _, err := routed.Set(ctx, cachewire.SetRequest{
+		Key:   reseedKey,
+		Value: []byte(value + "-post-quota"),
+	}); err != nil {
+		log.Fatalf("post-quota set: %v", err)
+	}
+	record, err := routed.Get(ctx, cachewire.GetRequest{Key: reseedKey})
+	if err != nil {
+		log.Fatalf("post-quota get: %v", err)
+	}
+	if !record.Found || string(record.Value) != value+"-post-quota" {
+		log.Fatalf("post-quota get = %+v, want %q", record, value+"-post-quota")
 	}
 }
 
@@ -115,6 +139,7 @@ func runMultinode(ctx context.Context, controlAddr string, baseKey cachewire.Key
 	requireBatchValue(get, 1, value+"-b")
 	requireDirectValue(ctx, first.Addr, firstKey, value+"-a")
 	requireDirectValue(ctx, second.Addr, secondKey, value+"-b")
+	runMultinodePrimitiveSmoke(ctx, routed, first, second, firstKey, secondKey, value)
 
 	if _, err := fmt.Fprintln(os.Stdout, "routed tcp multinode batch ok"); err != nil {
 		log.Fatalf("write smoke output: %v", err)

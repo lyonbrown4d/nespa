@@ -143,7 +143,9 @@ type Engine interface {
 	Exists(context.Context, Key, GetOptions) (bool, error)
 	Touch(context.Context, Key, TouchOptions) (bool, error)
 	Adjust(context.Context, Key, AdjustOptions) (Record, bool, error)
+	EstimateAdjust(context.Context, Key, AdjustOptions) (WriteEstimate, error)
 	Primitive(context.Context, PrimitiveRequest) (PrimitiveResult, error)
+	EstimatePrimitive(context.Context, PrimitiveRequest) (PrimitiveEstimate, error)
 	Stats(context.Context) (Stats, error)
 	SweepExpired(context.Context, time.Time) (uint64, error)
 	Evict(context.Context, EvictOptions) (EvictResult, error)
@@ -195,7 +197,9 @@ const (
 	commandDelete
 	commandTouch
 	commandAdjust
+	commandAdjustEstimate
 	commandPrimitive
+	commandPrimitiveEstimate
 	commandStats
 	commandSweep
 	commandEvict
@@ -223,6 +227,7 @@ type shardResult struct {
 	deleted   bool
 	touched   bool
 	primitive PrimitiveResult
+	estimate  PrimitiveEstimate
 	stats     ShardStats
 	spaces    *collectionmapping.Map[spaceKey, spaceUsage]
 	swept     uint64

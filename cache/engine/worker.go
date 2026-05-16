@@ -9,15 +9,17 @@ import (
 type commandHandler func(*shardWorker, shardCommand) shardResult
 
 var commandHandlers = map[commandKind]commandHandler{
-	commandSet:       (*shardWorker).applySet,
-	commandGet:       (*shardWorker).applyGet,
-	commandDelete:    (*shardWorker).applyDelete,
-	commandTouch:     (*shardWorker).applyTouch,
-	commandAdjust:    (*shardWorker).applyAdjust,
-	commandPrimitive: (*shardWorker).applyPrimitive,
-	commandStats:     applyStatsCommand,
-	commandSweep:     applySweepCommand,
-	commandEvict:     applyEvictCommand,
+	commandSet:               (*shardWorker).applySet,
+	commandGet:               (*shardWorker).applyGet,
+	commandDelete:            (*shardWorker).applyDelete,
+	commandTouch:             (*shardWorker).applyTouch,
+	commandAdjust:            (*shardWorker).applyAdjust,
+	commandAdjustEstimate:    (*shardWorker).applyAdjustEstimate,
+	commandPrimitive:         (*shardWorker).applyPrimitive,
+	commandPrimitiveEstimate: (*shardWorker).applyPrimitiveEstimate,
+	commandStats:             applyStatsCommand,
+	commandSweep:             applySweepCommand,
+	commandEvict:             applyEvictCommand,
 }
 
 func (s *shardWorker) run(done <-chan struct{}) {

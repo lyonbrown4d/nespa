@@ -117,55 +117,6 @@ func (c *Client) Primitive(
 	return out, nil
 }
 
-func (c *Client) BatchSet(ctx context.Context, addr string, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
-	metadata, payload, err := cachewire.EncodeBatchSetRequest(request)
-	if err != nil {
-		return cachewire.BatchSetResponse{}, fmt.Errorf("encode cache batch set request: %w", err)
-	}
-	frame, err := c.do(ctx, addr, protocol.OpCacheBatchSet, request.RouteEpoch, metadata, payload)
-	if err != nil {
-		return cachewire.BatchSetResponse{}, err
-	}
-	out, decodeErr := cachewire.DecodeBatchSetResponse(frame.Metadata)
-	if decodeErr != nil {
-		return out, fmt.Errorf("decode cache batch set response: %w", decodeErr)
-	}
-	return out, nil
-}
-
-func (c *Client) BatchGet(ctx context.Context, addr string, request cachewire.BatchGetRequest) (cachewire.BatchGetResponse, error) {
-	metadata := cachewire.EncodeBatchGetRequest(request)
-	frame, err := c.do(ctx, addr, protocol.OpCacheBatchGet, request.RouteEpoch, metadata, nil)
-	if err != nil {
-		return cachewire.BatchGetResponse{}, err
-	}
-	out, decodeErr := cachewire.DecodeBatchGetResponse(frame.Metadata, frame.Payload)
-	if decodeErr != nil {
-		return out, fmt.Errorf("decode cache batch get response: %w", decodeErr)
-	}
-	return out, nil
-}
-
-func (c *Client) BatchPrimitive(
-	ctx context.Context,
-	addr string,
-	request cachewire.BatchPrimitiveRequest,
-) (cachewire.BatchPrimitiveResponse, error) {
-	metadata, payload, err := cachewire.EncodeBatchPrimitiveRequest(request)
-	if err != nil {
-		return cachewire.BatchPrimitiveResponse{}, fmt.Errorf("encode cache batch primitive request: %w", err)
-	}
-	frame, err := c.do(ctx, addr, protocol.OpCacheBatchPrimitive, request.RouteEpoch, metadata, payload)
-	if err != nil {
-		return cachewire.BatchPrimitiveResponse{}, err
-	}
-	out, decodeErr := cachewire.DecodeBatchPrimitiveResponse(frame.Metadata, frame.Payload)
-	if decodeErr != nil {
-		return out, fmt.Errorf("decode cache batch primitive response: %w", decodeErr)
-	}
-	return out, nil
-}
-
 func (c *Client) do(ctx context.Context, addr string, op protocol.Op, routeEpoch uint64, metadata, payload []byte) (protocol.Frame, error) {
 	conn, err := c.dial(ctx, addr)
 	if err != nil {

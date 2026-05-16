@@ -28,7 +28,7 @@ type routedBatchGroup[T any] struct {
 }
 
 func (c *RoutedTCPClient) BatchSet(ctx context.Context, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
-	records, err := routedBatch(ctx, c, len(request.Items),
+	records, err := routedBatch[indexedSetRequest, cachewire.Record](ctx, c, len(request.Items),
 		indexSetRequests(request.Items),
 		groupSetRequests,
 		func(epoch uint64, addr string, group *collectionlist.List[indexedSetRequest]) ([]cachewire.Record, error) {
@@ -50,7 +50,7 @@ func (c *RoutedTCPClient) BatchSet(ctx context.Context, request cachewire.BatchS
 }
 
 func (c *RoutedTCPClient) BatchGet(ctx context.Context, request cachewire.BatchGetRequest) (cachewire.BatchGetResponse, error) {
-	records, err := routedBatch(ctx, c, len(request.Items),
+	records, err := routedBatch[indexedGetRequest, cachewire.Record](ctx, c, len(request.Items),
 		indexGetRequests(request.Items),
 		groupGetRequests,
 		func(epoch uint64, addr string, group *collectionlist.List[indexedGetRequest]) ([]cachewire.Record, error) {
@@ -93,15 +93,15 @@ func indexGetRequests(items []cachewire.GetRequest) *collectionlist.List[indexed
 	return indexed
 }
 
-func routedBatch[T any](
+func routedBatch[T, R any](
 	ctx context.Context,
 	client *RoutedTCPClient,
 	count int,
 	items *collectionlist.List[T],
 	group func(controlapi.SnapshotBody, *collectionlist.List[T]) (*collectionlist.List[routedBatchGroup[T]], error),
-	send func(uint64, string, *collectionlist.List[T]) ([]cachewire.Record, error),
-	copyRecords func([]cachewire.Record, *collectionlist.List[T], []cachewire.Record),
-) ([]cachewire.Record, error) {
+	send func(uint64, string, *collectionlist.List[T]) ([]R, error),
+	copyRecords func([]R, *collectionlist.List[T], []R),
+) ([]R, error) {
 	if count == 0 {
 		return nil, nil
 	}
@@ -133,15 +133,15 @@ func routedBatch[T any](
 	return records, err
 }
 
-func runRoutedBatchWithCurrentSnapshot[T any](
+func runRoutedBatchWithCurrentSnapshot[T, R any](
 	ctx context.Context,
 	client *RoutedTCPClient,
 	count int,
 	items *collectionlist.List[T],
 	group func(controlapi.SnapshotBody, *collectionlist.List[T]) (*collectionlist.List[routedBatchGroup[T]], error),
-	send func(uint64, string, *collectionlist.List[T]) ([]cachewire.Record, error),
-	copyRecords func([]cachewire.Record, *collectionlist.List[T], []cachewire.Record),
-) ([]cachewire.Record, *collectionlist.List[routedBatchGroup[T]], error) {
+	send func(uint64, string, *collectionlist.List[T]) ([]R, error),
+	copyRecords func([]R, *collectionlist.List[T], []R),
+) ([]R, *collectionlist.List[routedBatchGroup[T]], error) {
 	snapshot, err := client.currentSnapshot(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -150,20 +150,20 @@ func runRoutedBatchWithCurrentSnapshot[T any](
 	if err != nil {
 		return nil, nil, err
 	}
-	records := make([]cachewire.Record, count)
+	records := make([]R, count)
 	return runRoutedBatch(count, snapshot.Revision, groups, records, send, copyRecords)
 }
 
-func runRoutedBatch[T any](
+func runRoutedBatch[T, R any](
 	count int,
 	epoch uint64,
 	groups *collectionlist.List[routedBatchGroup[T]],
-	records []cachewire.Record,
-	send func(uint64, string, *collectionlist.List[T]) ([]cachewire.Record, error),
-	copyRecords func([]cachewire.Record, *collectionlist.List[T], []cachewire.Record),
-) ([]cachewire.Record, *collectionlist.List[routedBatchGroup[T]], error) {
+	records []R,
+	send func(uint64, string, *collectionlist.List[T]) ([]R, error),
+	copyRecords func([]R, *collectionlist.List[T], []R),
+) ([]R, *collectionlist.List[routedBatchGroup[T]], error) {
 	if len(records) != count {
-		records = make([]cachewire.Record, count)
+		records = make([]R, count)
 	}
 
 	var remaining *collectionlist.List[routedBatchGroup[T]]

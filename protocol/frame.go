@@ -55,6 +55,9 @@ const (
 	OpCacheAdjust
 	OpCachePrimitive
 	OpCacheBatchPrimitive
+	OpCacheBatchDelete
+	OpCacheBatchExists
+	OpCacheBatchTouch
 )
 
 type Flags uint8

@@ -27,6 +27,22 @@ tasks.withType<JavaCompile>().configureEach {
     options.release.set(21)
 }
 
+tasks.withType<Test>().configureEach {
+    failOnNoDiscoveredTests = false
+}
+
+val wireSmokeTest by tasks.registering(JavaExec::class) {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Runs Java SDK wire codec smoke tests."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("io.github.lyonbrown4d.nespa.internal.WireSmokeTest")
+    enableAssertions = true
+}
+
+tasks.check {
+    dependsOn(wireSmokeTest)
+}
+
 tasks.wrapper {
 	gradleVersion = "9.5.1"
 	distributionType = Wrapper.DistributionType.BIN

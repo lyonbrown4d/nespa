@@ -26,15 +26,7 @@ func (c *RoutedTCPClient) BatchPrimitive(
 	ctx context.Context,
 	request cachewire.BatchPrimitiveRequest,
 ) (cachewire.BatchPrimitiveResponse, error) {
-	results := make([]cachewire.PrimitiveResult, 0, len(request.Items))
-	for index := range request.Items {
-		result, err := c.Primitive(ctx, request.Items[index])
-		if err != nil {
-			return cachewire.BatchPrimitiveResponse{Results: results}, fmt.Errorf("batch execute routed cache primitive: %w", err)
-		}
-		results = append(results, result)
-	}
-	return cachewire.BatchPrimitiveResponse{Results: results}, nil
+	return c.batchPrimitive(ctx, request)
 }
 
 func stampPrimitiveRequest(request *cachewire.PrimitiveRequest, decision routeDecision) {

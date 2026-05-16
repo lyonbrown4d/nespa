@@ -31,6 +31,11 @@ The SDK exposes stable cache operations:
 - `Adjust`
 - `BatchSet`
 - `BatchGet`
+- `BatchDelete`
+- `BatchExists`
+- `BatchTouch`
+- `Primitive`
+- `BatchPrimitive`
 
 Use `ErrorCodeOf(err)` to identify Nespa protocol errors such as
 `ErrorNoRoute` or `ErrorInvalidArgument`.

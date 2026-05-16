@@ -34,11 +34,13 @@ pwsh ./scripts/smoke-multinode.ps1
 ```
 
 The smoke script starts a local core server, creates `orders/session/SessionView`
-catalog metadata, waits for route materialization, runs a routed TCP set/get, and
-validates admin summary when admin is enabled.
+catalog metadata, waits for route materialization, runs routed TCP set/get,
+primitive, batch primitive, and quota rejection checks, and validates admin
+summary when admin is enabled.
 The multinode smoke starts one control process and two data-node processes,
-validates cross-node routed batch writes, stops one node, waits for route shrink,
-and verifies writes continue through the surviving route.
+validates cross-node routed batch writes and batch primitive grouping, stops one
+node, waits for route shrink, and verifies writes continue through the surviving
+route.
 
 Optional overrides and feature toggles can be passed, e.g.:
 
@@ -157,7 +159,9 @@ snapshot and retries the operation once.
 The frontend does not proxy cache reads or writes.
 
 Current hot-path ops are `CacheGet`, `CacheSet`, `CacheDelete`, `CacheExists`,
-`CacheTouch`, `CacheAdjust`, `CacheBatchGet`, and `CacheBatchSet`.
+`CacheTouch`, `CacheAdjust`, `CacheBatchGet`, `CacheBatchSet`,
+`CacheBatchDelete`, `CacheBatchExists`, `CacheBatchTouch`, `CachePrimitive`,
+and `CacheBatchPrimitive`.
 
 The current frame header is fixed-width and big-endian:
 
@@ -176,12 +180,13 @@ payload      []byte
 
 `metadata` carries `cachewire` binary metadata for cache ops, while `payload`
 carries raw cache value bytes. Protocol error frames still carry `cachewire.Error`
-JSON. Batch set/get metadata stores payload offsets so values do not need to be
-JSON encoded. DataNodes reject non-zero `route_epoch` values older than the
-node's latest observed control revision. The frame codec lives in `protocol`.
-Routed clients refresh the control snapshot and retry once when a node reports a
-stale route or when a dead-node connection fails and the refreshed route has
-changed.
+JSON. Batch set/get and batch primitive metadata store payload offsets so values
+do not need to be JSON encoded. Batch operations execute in request order and
+return already completed results if a later item fails. DataNodes reject non-zero
+`route_epoch` values older than the node's latest observed control revision. The
+frame codec lives in `protocol`. Routed clients refresh the control snapshot and
+retry once when a node reports a stale route or when a dead-node connection fails
+and the refreshed route has changed.
 
 The control plane exposes a narrow rebalance event view at
 `/v1/control/rebalance/events`. It records route-table changes such as node join,
@@ -189,9 +194,10 @@ node suspect/dead, node recovery, address changes, and space route creation. Thi
 is currently an observability/control-state surface only; data migration and
 replication are not implemented in this stage.
 
-The data plane is intentionally a versioned binary KV plane (`set/get/delete/exists/touch/adjust`
-and batch variants). Redis command compatibility and native Redis data-structure
-operations are not part of this stage.
+The data plane is intentionally a versioned binary KV and primitive collection
+plane. It supports `set/get/delete/exists/touch/adjust`, batch variants, and a
+small native primitive set for `counter`, `map`, `set`, and `scored set`.
+Redis protocol, command, and cluster compatibility are not part of this stage.
 
 The public TCP client SDK lives in `client` and uses `transport/tcp` underneath.
 Use `client.NewTCP` for a direct single-node TCP client, or `client.NewRoutedTCP`

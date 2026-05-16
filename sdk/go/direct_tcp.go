@@ -143,6 +143,54 @@ func (c *directTCPClient) BatchGet(ctx context.Context, request cachewire.BatchG
 	return out, nil
 }
 
+func (c *directTCPClient) BatchDelete(
+	ctx context.Context,
+	request cachewire.BatchDeleteRequest,
+) (cachewire.BatchDeleteResponse, error) {
+	frame, err := c.do(ctx, protocol.OpCacheBatchDelete, request.RouteEpoch,
+		cachewire.EncodeBatchDeleteRequest(request), nil)
+	if err != nil {
+		return cachewire.BatchDeleteResponse{}, fmt.Errorf("batch delete cache records: %w", err)
+	}
+	out, decodeErr := cachewire.DecodeBatchDeleteResponse(frame.Metadata)
+	if decodeErr != nil {
+		return out, fmt.Errorf("decode cache batch delete response: %w", decodeErr)
+	}
+	return out, nil
+}
+
+func (c *directTCPClient) BatchExists(
+	ctx context.Context,
+	request cachewire.BatchExistsRequest,
+) (cachewire.BatchExistsResponse, error) {
+	frame, err := c.do(ctx, protocol.OpCacheBatchExists, request.RouteEpoch,
+		cachewire.EncodeBatchExistsRequest(request), nil)
+	if err != nil {
+		return cachewire.BatchExistsResponse{}, fmt.Errorf("batch exists cache records: %w", err)
+	}
+	out, decodeErr := cachewire.DecodeBatchExistsResponse(frame.Metadata)
+	if decodeErr != nil {
+		return out, fmt.Errorf("decode cache batch exists response: %w", decodeErr)
+	}
+	return out, nil
+}
+
+func (c *directTCPClient) BatchTouch(
+	ctx context.Context,
+	request cachewire.BatchTouchRequest,
+) (cachewire.BatchTouchResponse, error) {
+	frame, err := c.do(ctx, protocol.OpCacheBatchTouch, request.RouteEpoch,
+		cachewire.EncodeBatchTouchRequest(request), nil)
+	if err != nil {
+		return cachewire.BatchTouchResponse{}, fmt.Errorf("batch touch cache records: %w", err)
+	}
+	out, decodeErr := cachewire.DecodeBatchTouchResponse(frame.Metadata)
+	if decodeErr != nil {
+		return out, fmt.Errorf("decode cache batch touch response: %w", decodeErr)
+	}
+	return out, nil
+}
+
 func (c *directTCPClient) BatchPrimitive(
 	ctx context.Context,
 	request cachewire.BatchPrimitiveRequest,

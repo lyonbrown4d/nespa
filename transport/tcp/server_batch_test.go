@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/lyonbrown4d/nespa/cachewire"
+	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
 )
 
 func TestClientServerBatchSetGet(t *testing.T) {
@@ -34,6 +35,39 @@ func TestClientServerBatchSetGet(t *testing.T) {
 	requireBatchGet(t, get)
 }
 
+func TestClientServerBatchDeleteExistsTouch(t *testing.T) {
+	server, client := startCacheClientServer(t)
+	keys := []cachewire.Key{
+		{Namespace: "ns", Space: "sp", Key: "a"},
+		{Namespace: "ns", Space: "sp", Key: "b"},
+	}
+	seedBatchRecords(t, client, server.Addr(), keys)
+
+	exists, err := client.BatchExists(t.Context(), server.Addr(), cachewire.BatchExistsRequest{
+		Items: []cachewire.ExistsRequest{{Key: keys[0]}, {Key: keys[1]}},
+	})
+	if err != nil {
+		t.Fatalf("batch exists: %v", err)
+	}
+	requireBatchExists(t, exists)
+
+	touch, err := client.BatchTouch(t.Context(), server.Addr(), cachewire.BatchTouchRequest{
+		Items: []cachewire.TouchRequest{{Key: keys[0], TTLMillis: 1000}},
+	})
+	if err != nil {
+		t.Fatalf("batch touch: %v", err)
+	}
+	requireBatchTouch(t, touch)
+
+	deleted, err := client.BatchDelete(t.Context(), server.Addr(), cachewire.BatchDeleteRequest{
+		Items: []cachewire.DeleteRequest{{Key: keys[0]}, {Key: keys[1]}},
+	})
+	if err != nil {
+		t.Fatalf("batch delete: %v", err)
+	}
+	requireBatchDelete(t, deleted)
+}
+
 func requireBatchGet(t *testing.T, get cachewire.BatchGetResponse) {
 	t.Helper()
 	if len(get.Records) != 3 {
@@ -47,5 +81,39 @@ func requireBatchGet(t *testing.T, get cachewire.BatchGetResponse) {
 	}
 	if !get.Records[2].Found || string(get.Records[2].Value) != "beta" {
 		t.Fatalf("unexpected second batch get record: %+v", get.Records[2])
+	}
+}
+
+func requireBatchExists(t *testing.T, exists cachewire.BatchExistsResponse) {
+	t.Helper()
+	if len(exists.Results) != 2 || !exists.Results[0].Exists || !exists.Results[1].Exists {
+		t.Fatalf("unexpected batch exists response: %+v", exists)
+	}
+}
+
+func requireBatchTouch(t *testing.T, touch cachewire.BatchTouchResponse) {
+	t.Helper()
+	if len(touch.Results) != 1 || !touch.Results[0].Touched {
+		t.Fatalf("unexpected batch touch response: %+v", touch)
+	}
+}
+
+func requireBatchDelete(t *testing.T, deleted cachewire.BatchDeleteResponse) {
+	t.Helper()
+	if len(deleted.Results) != 2 || !deleted.Results[0].Deleted || !deleted.Results[1].Deleted {
+		t.Fatalf("unexpected batch delete response: %+v", deleted)
+	}
+}
+
+func seedBatchRecords(t *testing.T, client *cachetcp.Client, addr string, keys []cachewire.Key) {
+	t.Helper()
+	_, err := client.BatchSet(t.Context(), addr, cachewire.BatchSetRequest{
+		Items: []cachewire.SetRequest{
+			{Key: keys[0], Value: []byte("alpha")},
+			{Key: keys[1], Value: []byte("beta")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed batch records: %v", err)
 	}
 }

@@ -121,3 +121,36 @@ func (c *TCPClient) BatchGet(ctx context.Context, request cachewire.BatchGetRequ
 	}
 	return response, nil
 }
+
+func (c *TCPClient) BatchDelete(
+	ctx context.Context,
+	request cachewire.BatchDeleteRequest,
+) (cachewire.BatchDeleteResponse, error) {
+	response, err := c.transport.BatchDelete(ctx, c.addr, request)
+	if err != nil {
+		return cachewire.BatchDeleteResponse{}, fmt.Errorf("batch delete cache records: %w", err)
+	}
+	return response, nil
+}
+
+func (c *TCPClient) BatchExists(
+	ctx context.Context,
+	request cachewire.BatchExistsRequest,
+) (cachewire.BatchExistsResponse, error) {
+	response, err := c.transport.BatchExists(ctx, c.addr, request)
+	if err != nil {
+		return cachewire.BatchExistsResponse{}, fmt.Errorf("batch check cache records: %w", err)
+	}
+	return response, nil
+}
+
+func (c *TCPClient) BatchTouch(
+	ctx context.Context,
+	request cachewire.BatchTouchRequest,
+) (cachewire.BatchTouchResponse, error) {
+	response, err := c.transport.BatchTouch(ctx, c.addr, request)
+	if err != nil {
+		return cachewire.BatchTouchResponse{}, fmt.Errorf("batch touch cache records: %w", err)
+	}
+	return response, nil
+}

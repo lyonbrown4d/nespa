@@ -83,6 +83,9 @@ type Service interface {
 	BatchPrimitive(context.Context, []PrimitiveRequest) ([]PrimitiveResult, error)
 	BatchSet(context.Context, []SetRequest) ([]SetResult, error)
 	BatchGet(context.Context, []GetRequest) ([]GetResult, error)
+	BatchDelete(context.Context, []DeleteRequest) ([]DeleteResult, error)
+	BatchExists(context.Context, []GetRequest) ([]ExistsResult, error)
+	BatchTouch(context.Context, []TouchRequest) ([]TouchResult, error)
 	Stats(context.Context) (Stats, error)
 	Evict(context.Context, EvictRequest) (EvictResult, error)
 }
@@ -103,9 +106,27 @@ type GetRequest struct {
 	Options GetOptions
 }
 
+type TouchRequest struct {
+	Key     Key
+	Options TouchOptions
+}
+
 type GetResult struct {
 	Record Record
 	Found  bool
+}
+
+type DeleteResult struct {
+	Deleted bool
+	Found   bool
+}
+
+type ExistsResult struct {
+	Exists bool
+}
+
+type TouchResult struct {
+	Touched bool
 }
 
 type EvictRequest struct {
@@ -141,7 +162,7 @@ func (s *EngineService) Set(ctx context.Context, key Key, value []byte, opts Set
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.admitSet(ctx, key, value); err != nil {
+	if err := s.admitSet(ctx, key, value, opts); err != nil {
 		return SetResult{}, err
 	}
 
@@ -209,6 +230,10 @@ func (s *EngineService) Adjust(ctx context.Context, key Key, opts AdjustOptions)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.admitAdjust(ctx, key, opts); err != nil {
+		return SetResult{}, err
+	}
+
 	record, applied, err := s.engine.Adjust(ctx, key, engine.AdjustOptions{
 		Delta:            opts.Delta,
 		InitialValue:     opts.InitialValue,
@@ -227,6 +252,9 @@ func (s *EngineService) Primitive(ctx context.Context, request PrimitiveRequest)
 	if request.Kind.Mutates() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		if err := s.admitPrimitive(ctx, request); err != nil {
+			return PrimitiveResult{}, err
+		}
 	}
 	return s.executePrimitive(ctx, request)
 }
@@ -259,32 +287,4 @@ func (s *EngineService) Evict(ctx context.Context, request EvictRequest) (EvictR
 		return EvictResult{}, fmt.Errorf("evict engine records: %w", err)
 	}
 	return result, nil
-}
-
-func (s *EngineService) admitSet(ctx context.Context, key Key, value []byte) error {
-	if !s.hasQuotaLimits() {
-		return nil
-	}
-
-	nextCost := engine.EstimateCost(key, value)
-	oldCost, err := s.currentCost(ctx, key)
-	if err != nil {
-		return err
-	}
-	if nextCost <= oldCost {
-		return nil
-	}
-	delta := nextCost - oldCost
-
-	stats, err := s.engine.Stats(ctx)
-	if err != nil {
-		return fmt.Errorf("read engine stats for admission: %w", err)
-	}
-	nsUsage, spaceUsage := usageFor(stats, key.Namespace, key.Space)
-
-	nsUsage, _, err = s.ensureSpaceQuota(ctx, key, nsUsage, spaceUsage, delta)
-	if err != nil {
-		return err
-	}
-	return s.ensureNamespaceQuota(key, nsUsage, delta)
 }

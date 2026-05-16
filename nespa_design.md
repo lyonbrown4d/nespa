@@ -1,7 +1,7 @@
 # Nespa 分布式缓存平台设计文档
 
-> Draft v0.1  
-> 更新时间：2026-05-12  
+> Draft v0.1
+> 更新时间：2026-05-16
 > 目标读者：核心研发、平台研发、SRE、架构评审人员
 
 ---
@@ -62,11 +62,42 @@ Nespa 第一阶段明确不做：
 
 ### 2.2.1 数据结构能力决策
 
-在 MVP 阶段，Nespa 不提供 Redis 风格的内置数据结构命令（STRING/BINARY 已外部序列化之外，不再细分为 HASH/LIST/SET/ZSET/STREAM 等语义）。
+在 MVP 阶段，Nespa 不做 Redis 协议/命令兼容，也不完整复刻 Redis 数据结构矩阵。但为了降低业务方在常见缓存结构上的重复编解码成本，数据面保留一组小而稳定的原生 primitive collection op。
 
-- 数据面核心 API 维持 `set/get/delete/exists/touch/batch` 与 `namespace/space/entity/key` 地址模型；
-- 复杂结构能力通过应用层编解码实现（Protobuf/JSON/自定义容器编码写入 `[]byte`）；
-- 如需内置结构能力，放在二期设计，单独定义 schema/operation 扩展，不要在第一阶段与控制面/路由/并发控制耦合。
+第一阶段支持：
+
+- 基础 KV：`set/get/delete/exists/touch/adjust/batch set/batch get/batch delete/batch exists/batch touch`；
+- Counter：`CounterAdjust`，用于低成本原子数值调整；
+- Map：`MapSet/MapGet/MapDelete/MapGetAll`；
+- Set：`SetAdd/SetRemove/SetContains/SetMembers`；
+- ScoredSet：`ScoredSetPut/ScoredSetRemove/ScoredSetRange`；
+- BatchPrimitive：一次请求承载多种 primitive op，降低用户心智负担和网络往返。
+
+边界：
+
+- 不提供 Redis 协议、Redis 命令名、Redis Cluster、RESP 或 Redis client 兼容；
+- 不在第一阶段实现 List/Stream/Bitmap/HyperLogLog/Geo 等扩展结构；
+- primitive collection 仍绑定 `namespace/space/entity/key` 地址模型，并共享 TTL、ExpectedVersion、namespace/space version、route_epoch、quota admission 和 batch 语义；
+- collection 值在 DataNode 内部使用 `collectionx` 二进制序列化；外部仍通过 Nespa TCP frame 暴露稳定协议，不暴露内部编码。
+
+### 2.2.2 当前迭代状态
+
+当前仓库已经落地到可运行的单进程/多进程 scaffold：
+
+- control/node/admin/frontend 可由同一 Go binary 按开关启动；frontend 只保留 route/debug/console 视图，不承载 cache HTTP gateway；
+- 数据热路径走 TCP binary protocol，已支持 KV、adjust、batch set/get/delete/exists/touch、primitive、batch primitive；
+- DataNode memory engine 已有 TTL、ExpectedVersion 乐观锁、namespace/space version 可见性、sampled eviction、namespace/space memory quota；
+- set、adjust、primitive 写入和 batch 写入已接入 quota admission，写前预估增长成本，不允许绕过 space/namespace quota；ExpectedVersion 未命中时不会提前触发 quota reject；
+- routed TCP client 会读取 control snapshot，按 vslot 直连 DataNode；batch set/get/delete/exists/touch/primitive 会按 route 分组，失败后刷新 snapshot 并只重试未完成组；
+- Go SDK 已放在 `sdk/go`，通过 go work 参与多子包开发；Java SDK 已放在 `sdk/java`，使用 Gradle Kotlin DSL、wrapper、version catalog、Lombok plugin、JPMS，并带 direct TCP/wire smoke 覆盖。
+
+尚未落地或仍是设计目标：
+
+- Dragonboat-backed 控制面 FSM、持久化 snapshot/restore；
+- 数据迁移、复制、副本追赶和生产级 rebalance；
+- schema/query/index planner；
+- principal/grant 鉴权链路；
+- Java routed SDK、更多语言 SDK、生产级连接池和 TLS 策略。
 
 ### 2.3 关键边界
 
@@ -460,7 +491,7 @@ github.com/arcgolabs/collectionx
 - Range / RangeSet / RangeMap
 - RingBuffer / PriorityQueue
 
-注意：数据面 hot path 的核心 hash table、slab、posting list 可以先自研；collectionx 更适合控制面、planner、元数据、非极限热路径结构。
+当前实现中，DataNode 基础 entry table、TTL、eviction 和 quota accounting 仍由 engine 自己管理；primitive Map/Set/ScoredSet 的集合表示与二进制序列化使用 `collectionx`，以避免手写容器和编码分叉。后续如果 primitive collection 成为极限热路径，再评估替换为专用结构。
 
 ### 5.11 客户端基础能力
 
@@ -994,7 +1025,7 @@ per-shard raft data replication
 
 ## 8. API 设计
 
-### 8.1 基础 KV API
+### 8.1 基础 KV 与 Primitive API
 
 数据面使用 Nespa TCP frame。Frame header 固定宽度；cache op metadata 使用 `cachewire` binary codec；payload 保存原始 value bytes。
 
@@ -1019,8 +1050,14 @@ CacheSet
 CacheDelete
 CacheExists
 CacheTouch
+CacheAdjust
 CacheBatchGet
 CacheBatchSet
+CacheBatchDelete
+CacheBatchExists
+CacheBatchTouch
+CachePrimitive
+CacheBatchPrimitive
 ```
 
 逻辑 key：
@@ -1037,7 +1074,10 @@ CacheBatchSet
 Value 传输规则：
 
 - 单 key op：metadata 使用 binary codec 描述 key、ttl、version、found/deleted/touched 等字段，payload 传输 value bytes
-- batch set/get：metadata 使用 binary codec 保存 payload_offset/payload_size，payload 拼接多个 value bytes
+- batch set/get/delete/exists/touch：metadata 使用 binary codec 保存 item 列表；batch set/get 使用 payload_offset/payload_size，payload 拼接多个 value bytes
+- primitive op：metadata 描述 kind、field/member/score/range/version 等结构化参数，payload 传输 Map value 或 primitive result value
+- batch primitive：metadata 依次保存 primitive item 与 payload offset，payload 拼接所有 value bytes；routed SDK 发送前按 route 分组，响应按原请求顺序回填
+- batch 执行语义：第一阶段为单节点内顺序执行，不提供跨 key 原子性；若第 N 个 item 失败，服务端返回前 N-1 个已完成结果和错误，routed client 刷新 route 后只重试未发送/未完成的 route group
 - response 使用 flags 区分正常响应和协议错误；协议错误 frame 在 MVP 阶段仍使用 `cachewire.Error` JSON metadata
 - route_epoch 用于让 SDK/DataNode 检测客户端路由是否过旧；MVP 中 DataNode 对非 0 且小于本节点已观测 control revision 的请求返回 `ErrorNoRoute`，routed SDK 收到该错误后刷新 snapshot 并重试一次
 
@@ -1929,11 +1969,17 @@ SDK direct-route mode
 DataNode memory engine
 TCP framed cache transport
 TTL
+ExpectedVersion optimistic writes
 space flush by version bump
 namespace flush by version bump
 sampled eviction
+Counter primitive op
+Map/Set/ScoredSet primitive ops
+BatchDelete/BatchExists/BatchTouch
+BatchPrimitive
 async primary-replica replication
 Go SDK
+Java SDK direct TCP/wire foundation
 Admin API
 Plano-based schema declaration
 Query AST
@@ -1968,7 +2014,7 @@ cross-region raft
 ## 19. Phase 2
 
 ```text
-Java SDK
+Java routed SDK
 full-text MATCH
 Bleve text index integration
 async delete by query

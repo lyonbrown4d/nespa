@@ -80,6 +80,21 @@ type BatchGetRequest struct {
 	Items      []GetRequest `json:"items"`
 }
 
+type BatchDeleteRequest struct {
+	RouteEpoch uint64          `json:"-"`
+	Items      []DeleteRequest `json:"items"`
+}
+
+type BatchExistsRequest struct {
+	RouteEpoch uint64          `json:"-"`
+	Items      []ExistsRequest `json:"items"`
+}
+
+type BatchTouchRequest struct {
+	RouteEpoch uint64         `json:"-"`
+	Items      []TouchRequest `json:"items"`
+}
+
 type Record struct {
 	Found            bool   `json:"found"`
 	Namespace        string `json:"namespace,omitempty"`
@@ -113,6 +128,18 @@ type BatchSetResponse struct {
 
 type BatchGetResponse struct {
 	Records []Record `json:"records"`
+}
+
+type BatchDeleteResponse struct {
+	Results []DeleteResponse `json:"results"`
+}
+
+type BatchExistsResponse struct {
+	Results []ExistsResponse `json:"results"`
+}
+
+type BatchTouchResponse struct {
+	Results []TouchResponse `json:"results"`
 }
 
 type Error struct {

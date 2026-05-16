@@ -153,6 +153,9 @@ func (s *Server) cacheHandlers() map[protocol.Op]frameHandler {
 		protocol.OpCacheBatchSet:       s.handleBatchSet,
 		protocol.OpCacheBatchGet:       s.handleBatchGet,
 		protocol.OpCacheBatchPrimitive: s.handleBatchPrimitive,
+		protocol.OpCacheBatchDelete:    s.handleBatchDelete,
+		protocol.OpCacheBatchExists:    s.handleBatchExists,
+		protocol.OpCacheBatchTouch:     s.handleBatchTouch,
 		protocol.OpNodeHeartbeat:       s.handleUnsupportedFrame,
 		protocol.OpControlSnapshot:     s.handleUnsupportedFrame,
 		protocol.OpControlWatch:        s.handleUnsupportedFrame,
@@ -252,34 +255,6 @@ func (s *Server) handleAdjust(ctx context.Context, frame protocol.Frame) protoco
 		return cacheErrorFrame(frame, err)
 	}
 	return recordFrame(frame, result.Record, result.Found)
-}
-
-func (s *Server) handleBatchSet(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	request, err := cachewire.DecodeBatchSetRequest(frame.Metadata, frame.Payload)
-	if err != nil {
-		return errorFrame(frame, protocol.ErrorBadFrame, err)
-	}
-	records, err := s.service.BatchSet(ctx, batchSetRequests(request.Items))
-	if err != nil {
-		return cacheErrorFrame(frame, err)
-	}
-	return metadataFrame(frame, cachewire.EncodeBatchSetResponse(cachewire.BatchSetResponse{Records: recordsFromSetResults(records)}), nil)
-}
-
-func (s *Server) handleBatchGet(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	request, err := cachewire.DecodeBatchGetRequest(frame.Metadata)
-	if err != nil {
-		return errorFrame(frame, protocol.ErrorBadFrame, err)
-	}
-	results, err := s.service.BatchGet(ctx, batchGetRequests(request.Items))
-	if err != nil {
-		return cacheErrorFrame(frame, err)
-	}
-	metadata, payload, err := cachewire.EncodeBatchGetResponse(cachewire.BatchGetResponse{Records: recordsFromResults(results)})
-	if err != nil {
-		return errorFrame(frame, protocol.ErrorInternal, err)
-	}
-	return metadataFrame(frame, metadata, payload)
 }
 
 func recordFrame(frame protocol.Frame, rec cache.Record, found bool) protocol.Frame {
