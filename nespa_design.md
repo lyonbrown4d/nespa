@@ -60,6 +60,14 @@ Nespa 第一阶段明确不做：
 - 把缓存 value 放进控制面 Raft
 - 每个 data shard 使用 Raft 做强一致复制
 
+### 2.2.1 数据结构能力决策
+
+在 MVP 阶段，Nespa 不提供 Redis 风格的内置数据结构命令（STRING/BINARY 已外部序列化之外，不再细分为 HASH/LIST/SET/ZSET/STREAM 等语义）。
+
+- 数据面核心 API 维持 `set/get/delete/exists/touch/batch` 与 `namespace/space/entity/key` 地址模型；
+- 复杂结构能力通过应用层编解码实现（Protobuf/JSON/自定义容器编码写入 `[]byte`）；
+- 如需内置结构能力，放在二期设计，单独定义 schema/operation 扩展，不要在第一阶段与控制面/路由/并发控制耦合。
+
 ### 2.3 关键边界
 
 控制面和数据面必须拆开：

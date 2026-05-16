@@ -162,6 +162,10 @@ JSON. Batch set/get metadata stores payload offsets so values do not need to be
 JSON encoded. DataNodes reject non-zero `route_epoch` values older than the
 node's latest observed control revision. The frame codec lives in `protocol`.
 
+The data plane is intentionally a versioned binary KV plane (`set/get/delete/exists/touch`
+and batch variants). Redis command compatibility and native Redis data-structure
+operations are not part of this stage.
+
 The public TCP client SDK lives in `client` and uses `transport/tcp` underneath.
 Use `client.NewTCP` for a direct single-node TCP client, or `client.NewRoutedTCP`
 to resolve routes from the control plane and connect directly to DataNodes. The
