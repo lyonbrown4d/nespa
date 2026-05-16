@@ -122,6 +122,25 @@ func (e *MemoryEngine) Touch(ctx context.Context, key Key, opts TouchOptions) (b
 	return result.touched, result.err
 }
 
+func (e *MemoryEngine) Adjust(ctx context.Context, key Key, opts AdjustOptions) (Record, bool, error) {
+	if err := validateKey(key); err != nil {
+		return Record{}, false, err
+	}
+
+	result, err := e.execute(ctx, shardCommand{
+		kind:     commandAdjust,
+		physical: physicalKey(key),
+		key:      key,
+		adjust:   opts,
+		now:      e.now(),
+		reply:    make(chan shardResult, 1),
+	})
+	if err != nil {
+		return Record{}, false, err
+	}
+	return result.record, result.found, result.err
+}
+
 func (e *MemoryEngine) Stats(ctx context.Context) (Stats, error) {
 	stats := Stats{Shards: make([]ShardStats, len(e.shards))}
 	spaces := make(map[spaceKey]spaceUsage)

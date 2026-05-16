@@ -205,6 +205,128 @@ func TestClientServerTouchHonorsVersions(t *testing.T) {
 	}
 }
 
+func TestClientServerAdjustIncrementsAndPreservesTTL(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	key := cachewire.Key{Namespace: "ns", Space: "sp", Key: "counter"}
+
+	record, err := client.Adjust(ctx, server.Addr(), cachewire.AdjustRequest{
+		Key:          key,
+		InitialValue: 10,
+		Delta:        7,
+		TTLMillis:    5000,
+	})
+	if err != nil {
+		t.Fatalf("adjust create: %v", err)
+	}
+	if !record.Found || string(record.Value) != "17" || record.Version != 1 || record.ExpireAtUnixMs <= 0 {
+		t.Fatalf("adjust create record = %+v", record)
+	}
+
+	record, err = client.Adjust(ctx, server.Addr(), cachewire.AdjustRequest{
+		Key:   key,
+		Delta: -2,
+	})
+	if err != nil {
+		t.Fatalf("adjust increment: %v", err)
+	}
+	if !record.Found || string(record.Value) != "15" || record.Version != 2 {
+		t.Fatalf("adjust increment record = %+v", record)
+	}
+	if record.ExpireAtUnixMs <= 0 {
+		t.Fatalf("adjust should preserve TTL: %+v", record)
+	}
+}
+
+func TestClientServerAdjustRejectsMismatchedExpectedVersion(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	key := cachewire.Key{Namespace: "ns", Space: "sp", Key: "counter"}
+
+	seed, err := client.Adjust(ctx, server.Addr(), cachewire.AdjustRequest{
+		Key:          key,
+		InitialValue: 1,
+		Delta:        1,
+	})
+	if err != nil {
+		t.Fatalf("seed adjust: %v", err)
+	}
+
+	missed, err := client.Adjust(ctx, server.Addr(), cachewire.AdjustRequest{
+		Key:             key,
+		Delta:           1,
+		ExpectedVersion: seed.Version + 1,
+	})
+	if err != nil {
+		t.Fatalf("adjust with mismatch: %v", err)
+	}
+	if missed.Found {
+		t.Fatalf("adjust with mismatched version should not apply: %+v", missed)
+	}
+
+	record, err := client.Get(ctx, server.Addr(), cachewire.GetRequest{Key: key})
+	if err != nil {
+		t.Fatalf("get after mismatched adjust: %v", err)
+	}
+	if string(record.Value) != "2" {
+		t.Fatalf("record changed after mismatched adjust: %+v", record)
+	}
+}
+
+func TestClientServerAdjustRejectsInvalidValue(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	key := cachewire.Key{Namespace: "ns", Space: "sp", Key: "bad"}
+	if _, err := client.Set(ctx, server.Addr(), cachewire.SetRequest{
+		Key:   key,
+		Value: []byte("bad-int"),
+	}); err != nil {
+		t.Fatalf("seed set: %v", err)
+	}
+
+	_, err := client.Adjust(ctx, server.Addr(), cachewire.AdjustRequest{
+		Key:   key,
+		Delta: 1,
+	})
+	if err == nil {
+		t.Fatal("expected adjust invalid value error")
+	}
+	wireErr, ok := errors.AsType[cachewire.Error](err)
+	if !ok {
+		t.Fatalf("expected cachewire.Error, got %T: %v", err, err)
+	}
+	if wireErr.Code != protocol.ErrorInternal {
+		t.Fatalf("unexpected error code: %d", wireErr.Code)
+	}
+}
+
 func TestClientServerRejectsStaleRouteEpoch(t *testing.T) {
 	eng := engine.NewMemory(engine.Config{ShardCount: 2})
 	defer closeEngine(t, eng)

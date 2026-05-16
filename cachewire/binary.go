@@ -156,6 +156,65 @@ func DecodeTouchRequest(raw []byte) (TouchRequest, error) {
 	}, nil
 }
 
+func EncodeAdjustRequest(request AdjustRequest) []byte {
+	raw := newMetadata()
+	raw = appendKey(raw, request.Key)
+	raw = appendInt64(raw, request.TTLMillis)
+	raw = appendInt64(raw, request.InitialValue)
+	raw = appendInt64(raw, request.Delta)
+	raw = appendUint64(raw, request.NamespaceVersion)
+	raw = appendUint64(raw, request.SpaceVersion)
+	raw = appendUint64(raw, request.ExpectedVersion)
+	return raw
+}
+
+func DecodeAdjustRequest(raw []byte) (AdjustRequest, error) {
+	cursor, err := newCursor(raw)
+	if err != nil {
+		return AdjustRequest{}, err
+	}
+	key, err := cursor.readKey()
+	if err != nil {
+		return AdjustRequest{}, err
+	}
+	ttlMillis, err := cursor.readInt64()
+	if err != nil {
+		return AdjustRequest{}, err
+	}
+	initialValue, err := cursor.readInt64()
+	if err != nil {
+		return AdjustRequest{}, err
+	}
+	delta, err := cursor.readInt64()
+	if err != nil {
+		return AdjustRequest{}, err
+	}
+	namespaceVersion, err := cursor.readUint64()
+	if err != nil {
+		return AdjustRequest{}, err
+	}
+	spaceVersion, err := cursor.readUint64()
+	if err != nil {
+		return AdjustRequest{}, err
+	}
+	expectedVersion, err := cursor.readUint64()
+	if err != nil {
+		return AdjustRequest{}, err
+	}
+	if err := cursor.ensureEOF(); err != nil {
+		return AdjustRequest{}, err
+	}
+	return AdjustRequest{
+		Key:              key,
+		TTLMillis:        ttlMillis,
+		InitialValue:     initialValue,
+		Delta:            delta,
+		NamespaceVersion: namespaceVersion,
+		SpaceVersion:     spaceVersion,
+		ExpectedVersion:  expectedVersion,
+	}, nil
+}
+
 func EncodeRecord(record Record) []byte {
 	raw := newMetadata()
 	raw = appendBool(raw, record.Found)

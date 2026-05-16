@@ -88,6 +88,15 @@ func (c *Client) Touch(ctx context.Context, addr string, request cachewire.Touch
 	return out, nil
 }
 
+func (c *Client) Adjust(ctx context.Context, addr string, request cachewire.AdjustRequest) (cachewire.Record, error) {
+	metadata := cachewire.EncodeAdjustRequest(request)
+	frame, err := c.do(ctx, addr, protocol.OpCacheAdjust, request.RouteEpoch, metadata, nil)
+	if err != nil {
+		return cachewire.Record{}, err
+	}
+	return decodeRecord(frame)
+}
+
 func (c *Client) BatchSet(ctx context.Context, addr string, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
 	metadata, payload, err := cachewire.EncodeBatchSetRequest(request)
 	if err != nil {

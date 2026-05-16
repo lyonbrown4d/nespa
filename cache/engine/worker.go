@@ -3,7 +3,10 @@ package engine
 import (
 	"fmt"
 	"maps"
+	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,6 +31,8 @@ func (s *shardWorker) apply(cmd shardCommand) shardResult {
 		return s.applyDelete(cmd)
 	case commandTouch:
 		return s.applyTouch(cmd)
+	case commandAdjust:
+		return s.applyAdjust(cmd)
 	case commandStats:
 		return s.statsResult()
 	case commandSweep:
@@ -179,6 +184,109 @@ func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
 	ent.accessCount++
 	s.touchHits++
 	return shardResult{touched: true}
+}
+
+func (s *shardWorker) applyAdjust(cmd shardCommand) shardResult {
+	existing, exists := s.entries[cmd.physical]
+	if exists && cmd.adjust.ExpectedVersion > 0 && existing.version != cmd.adjust.ExpectedVersion {
+		return shardResult{found: false}
+	}
+
+	var nextValue int64
+	var expireAt time.Time
+	var err error
+
+	switch {
+	case !exists:
+		if cmd.adjust.ExpectedVersion > 0 {
+			return shardResult{found: false}
+		}
+		nextValue, err = safeAdd(cmd.adjust.InitialValue, cmd.adjust.Delta)
+		if err != nil {
+			return shardResult{err: err}
+		}
+		if cmd.adjust.TTL > 0 {
+			expireAt = cmd.now.Add(cmd.adjust.TTL)
+		}
+	case existing.expired(cmd.now):
+		s.deleteEntry(cmd.physical, existing)
+		return shardResult{found: false}
+	default:
+		nextValue, err = addToCurrentCounter(existing.value, cmd.adjust.Delta)
+		if err != nil {
+			return shardResult{err: err}
+		}
+		expireAt = existing.expireAt
+	}
+
+	if err != nil {
+		return shardResult{err: err}
+	}
+
+	value := []byte(strconv.FormatInt(nextValue, 10))
+	cost := costOf(cmd.key, value)
+
+	if exists {
+		oldCost := existing.costBytes
+		existing.value = value
+		existing.version++
+		existing.namespaceVersion = cmd.adjust.NamespaceVersion
+		existing.spaceVersion = cmd.adjust.SpaceVersion
+		existing.expireAt = expireAt
+		existing.updatedAt = cmd.now
+		existing.lastAccessAt = cmd.now
+		existing.accessCount++
+		existing.costBytes = cost
+
+		if cost >= oldCost {
+			delta := cost - oldCost
+			s.memoryBytes += delta
+			s.addSpaceUsage(spaceKeyOf(cmd.key), 0, delta)
+		} else {
+			delta := oldCost - cost
+			s.memoryBytes -= delta
+			s.subtractSpaceUsage(spaceKeyOf(cmd.key), 0, delta)
+		}
+		return shardResult{record: existing.record(), found: true}
+	}
+
+	ent := &entry{
+		key:              cmd.key,
+		value:            append([]byte(nil), value...),
+		version:          1,
+		namespaceVersion: cmd.adjust.NamespaceVersion,
+		spaceVersion:     cmd.adjust.SpaceVersion,
+		expireAt:         expireAt,
+		createdAt:        cmd.now,
+		updatedAt:        cmd.now,
+		lastAccessAt:     cmd.now,
+		accessCount:      1,
+		costBytes:        cost,
+	}
+	s.entries[cmd.physical] = ent
+	s.objects++
+	s.memoryBytes += cost
+	s.addSpaceUsage(spaceKeyOf(cmd.key), 1, cost)
+	return shardResult{record: ent.record(), found: true}
+}
+
+func addToCurrentCounter(raw []byte, delta int64) (int64, error) {
+	text := strings.TrimSpace(string(raw))
+	current, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%w: parse int64 value: %w", invalidCounterValue, err)
+	}
+	return safeAdd(current, delta)
+}
+
+func safeAdd(base, delta int64) (int64, error) {
+	if delta > 0 && base > math.MaxInt64-delta {
+		return 0, fmt.Errorf("%w: overflow %d + %d", invalidCounterValue, base, delta)
+	}
+	if delta < 0 && base < math.MinInt64-delta {
+		return 0, fmt.Errorf("%w: overflow %d + %d", invalidCounterValue, base, delta)
+	}
+	return base + delta, nil
 }
 
 func (s *shardWorker) evict(opts EvictOptions) EvictResult {

@@ -73,6 +73,14 @@ func (c *TCPClient) Touch(ctx context.Context, request cachewire.TouchRequest) (
 	return response, nil
 }
 
+func (c *TCPClient) Adjust(ctx context.Context, request cachewire.AdjustRequest) (cachewire.Record, error) {
+	record, err := c.transport.Adjust(ctx, c.addr, request)
+	if err != nil {
+		return cachewire.Record{}, fmt.Errorf("adjust cache record: %w", err)
+	}
+	return record, nil
+}
+
 func (c *TCPClient) BatchSet(ctx context.Context, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
 	response, err := c.transport.BatchSet(ctx, c.addr, request)
 	if err != nil {

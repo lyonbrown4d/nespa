@@ -94,6 +94,27 @@ func TestBinaryTouchRequestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBinaryAdjustRequestRoundTrip(t *testing.T) {
+	key := binaryTestKey()
+	in := cachewire.AdjustRequest{
+		Key:              key,
+		TTLMillis:        1500,
+		InitialValue:     2,
+		Delta:            -3,
+		NamespaceVersion: 7,
+		SpaceVersion:     8,
+		ExpectedVersion:  9,
+	}
+
+	adjust, err := cachewire.DecodeAdjustRequest(cachewire.EncodeAdjustRequest(in))
+	if err != nil {
+		t.Fatalf("decode adjust request: %v", err)
+	}
+	if adjust.Key != key || adjust.TTLMillis != 1500 || adjust.InitialValue != 2 || adjust.Delta != -3 || adjust.NamespaceVersion != 7 || adjust.SpaceVersion != 8 || adjust.ExpectedVersion != 9 {
+		t.Fatalf("adjust request = %+v", adjust)
+	}
+}
+
 func TestBinaryRecordRoundTrip(t *testing.T) {
 	record := cachewire.Record{
 		Found:            true,

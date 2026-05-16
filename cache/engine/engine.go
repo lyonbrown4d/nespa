@@ -4,6 +4,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -14,6 +15,8 @@ var (
 	ErrClosed     = errors.New("engine: closed")
 	ErrNilContext = errors.New("engine: nil context")
 )
+
+var invalidCounterValue = fmt.Errorf("engine: adjust value must be an int64")
 
 type Config struct {
 	ShardCount    int
@@ -42,6 +45,15 @@ type GetOptions struct {
 }
 
 type TouchOptions struct {
+	TTL              time.Duration
+	NamespaceVersion uint64
+	SpaceVersion     uint64
+	ExpectedVersion  uint64
+}
+
+type AdjustOptions struct {
+	Delta            int64
+	InitialValue     int64
 	TTL              time.Duration
 	NamespaceVersion uint64
 	SpaceVersion     uint64
@@ -124,6 +136,7 @@ type Engine interface {
 	Delete(context.Context, Key, DeleteOptions) (bool, bool, error)
 	Exists(context.Context, Key, GetOptions) (bool, error)
 	Touch(context.Context, Key, TouchOptions) (bool, error)
+	Adjust(context.Context, Key, AdjustOptions) (Record, bool, error)
 	Stats(context.Context) (Stats, error)
 	SweepExpired(context.Context, time.Time) (uint64, error)
 	Evict(context.Context, EvictOptions) (EvictResult, error)
@@ -174,6 +187,7 @@ const (
 	commandGet
 	commandDelete
 	commandTouch
+	commandAdjust
 	commandStats
 	commandSweep
 	commandEvict
@@ -187,6 +201,7 @@ type shardCommand struct {
 	setOpts    SetOptions
 	getOpts    GetOptions
 	touch      TouchOptions
+	adjust     AdjustOptions
 	deleteOpts DeleteOptions
 	evict      EvictOptions
 	now        time.Time

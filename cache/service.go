@@ -59,6 +59,15 @@ type TouchOptions struct {
 	ExpectedVersion  uint64
 }
 
+type AdjustOptions struct {
+	Delta            int64
+	InitialValue     int64
+	TTL              time.Duration
+	NamespaceVersion uint64
+	SpaceVersion     uint64
+	ExpectedVersion  uint64
+}
+
 type DeleteOptions struct {
 	ExpectedVersion uint64
 }
@@ -69,6 +78,7 @@ type Service interface {
 	Delete(context.Context, Key, DeleteOptions) (bool, bool, error)
 	Exists(context.Context, Key, GetOptions) (bool, error)
 	Touch(context.Context, Key, TouchOptions) (bool, error)
+	Adjust(context.Context, Key, AdjustOptions) (SetResult, error)
 	BatchSet(context.Context, []SetRequest) ([]SetResult, error)
 	BatchGet(context.Context, []GetRequest) ([]GetResult, error)
 	Stats(context.Context) (Stats, error)
@@ -191,6 +201,24 @@ func (s *EngineService) Touch(ctx context.Context, key Key, opts TouchOptions) (
 		return false, fmt.Errorf("touch engine record: %w", err)
 	}
 	return touched, nil
+}
+
+func (s *EngineService) Adjust(ctx context.Context, key Key, opts AdjustOptions) (SetResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, applied, err := s.engine.Adjust(ctx, key, engine.AdjustOptions{
+		Delta:            opts.Delta,
+		InitialValue:     opts.InitialValue,
+		TTL:              opts.TTL,
+		NamespaceVersion: opts.NamespaceVersion,
+		SpaceVersion:     opts.SpaceVersion,
+		ExpectedVersion:  opts.ExpectedVersion,
+	})
+	if err != nil {
+		return SetResult{}, fmt.Errorf("adjust engine record: %w", err)
+	}
+	return SetResult{Record: record, Found: applied}, nil
 }
 
 func (s *EngineService) BatchSet(ctx context.Context, requests []SetRequest) ([]SetResult, error) {

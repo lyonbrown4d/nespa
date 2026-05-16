@@ -143,6 +143,8 @@ func (s *Server) dispatchFrame(ctx context.Context, frame protocol.Frame) protoc
 		return s.handleExists(ctx, frame)
 	case protocol.OpCacheTouch:
 		return s.handleTouch(ctx, frame)
+	case protocol.OpCacheAdjust:
+		return s.handleAdjust(ctx, frame)
 	case protocol.OpCacheBatchSet:
 		return s.handleBatchSet(ctx, frame)
 	case protocol.OpCacheBatchGet:
@@ -231,6 +233,18 @@ func (s *Server) handleTouch(ctx context.Context, frame protocol.Frame) protocol
 		return cacheErrorFrame(frame, err)
 	}
 	return metadataFrame(frame, cachewire.EncodeTouchResponse(cachewire.TouchResponse{Touched: touched}), nil)
+}
+
+func (s *Server) handleAdjust(ctx context.Context, frame protocol.Frame) protocol.Frame {
+	request, err := cachewire.DecodeAdjustRequest(frame.Metadata)
+	if err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
+	}
+	result, err := s.service.Adjust(ctx, keyFromWire(request.Key), adjustOptionsFromWire(request))
+	if err != nil {
+		return cacheErrorFrame(frame, err)
+	}
+	return recordFrame(frame, result.Record, result.Found)
 }
 
 func (s *Server) handleBatchSet(ctx context.Context, frame protocol.Frame) protocol.Frame {

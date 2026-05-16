@@ -104,6 +104,17 @@ func touchOptionsFromWire(request cachewire.TouchRequest) cache.TouchOptions {
 	}
 }
 
+func adjustOptionsFromWire(request cachewire.AdjustRequest) cache.AdjustOptions {
+	return cache.AdjustOptions{
+		TTL:              ttlFromMillis(request.TTLMillis),
+		InitialValue:     request.InitialValue,
+		Delta:            request.Delta,
+		NamespaceVersion: request.NamespaceVersion,
+		SpaceVersion:     request.SpaceVersion,
+		ExpectedVersion:  request.ExpectedVersion,
+	}
+}
+
 func recordsFromResults(results []cache.GetResult) []cachewire.Record {
 	out := make([]cachewire.Record, 0, len(results))
 	for index := range results {

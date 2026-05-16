@@ -59,6 +59,17 @@ type TouchRequest struct {
 	ExpectedVersion  uint64 `json:"expected_version,omitempty"`
 }
 
+type AdjustRequest struct {
+	Key
+	RouteEpoch       uint64 `json:"-"`
+	TTLMillis        int64  `json:"ttl_ms,omitempty"`
+	InitialValue     int64  `json:"initial_value,omitempty"`
+	Delta            int64  `json:"delta"`
+	NamespaceVersion uint64 `json:"namespace_version,omitempty"`
+	SpaceVersion     uint64 `json:"space_version,omitempty"`
+	ExpectedVersion  uint64 `json:"expected_version,omitempty"`
+}
+
 type BatchSetRequest struct {
 	RouteEpoch uint64       `json:"-"`
 	Items      []SetRequest `json:"items"`

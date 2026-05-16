@@ -120,6 +120,18 @@ func (c *RoutedTCPClient) Touch(ctx context.Context, request cachewire.TouchRequ
 	return response, nil
 }
 
+func (c *RoutedTCPClient) Adjust(ctx context.Context, request cachewire.AdjustRequest) (cachewire.Record, error) {
+	response, err := sendWithRouteRetry(ctx, c, request.Key, func(decision routeDecision) (cachewire.Record, error) {
+		next := request
+		stampAdjustRequest(&next, decision)
+		return c.transport.Adjust(ctx, decision.addr, next)
+	})
+	if err != nil {
+		return cachewire.Record{}, fmt.Errorf("adjust routed cache record: %w", err)
+	}
+	return response, nil
+}
+
 func sendWithRouteRetry[T any](
 	ctx context.Context,
 	client *RoutedTCPClient,
@@ -222,6 +234,12 @@ func stampExistsRequest(request *cachewire.ExistsRequest, decision routeDecision
 }
 
 func stampTouchRequest(request *cachewire.TouchRequest, decision routeDecision) {
+	request.RouteEpoch = decision.routeEpoch
+	request.NamespaceVersion = decision.namespaceVersion
+	request.SpaceVersion = decision.spaceVersion
+}
+
+func stampAdjustRequest(request *cachewire.AdjustRequest, decision routeDecision) {
 	request.RouteEpoch = decision.routeEpoch
 	request.NamespaceVersion = decision.namespaceVersion
 	request.SpaceVersion = decision.spaceVersion

@@ -50,6 +50,7 @@ const (
 	OpControlWatch
 	OpCacheExists
 	OpCacheTouch
+	OpCacheAdjust
 )
 
 type Flags uint8
