@@ -299,6 +299,46 @@ func TestEngineServiceAdjustRejectsMismatchedExpectedVersion(t *testing.T) {
 	}
 }
 
+func TestEngineServiceAdjustRejectsNonIntExistingValue(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	svc := cache.NewService(eng)
+	key := cache.Key{Namespace: "n", Space: "s", Key: "counter"}
+
+	if _, err := svc.Set(context.Background(), key, []byte("bad-int"), cache.SetOptions{}); err != nil {
+		t.Fatalf("seed set: %v", err)
+	}
+
+	_, err := svc.Adjust(context.Background(), key, cache.AdjustOptions{Delta: 1})
+	if err == nil {
+		t.Fatal("adjust should fail for non-int value")
+	}
+	if !errors.Is(err, engine.ErrInvalidCounter) {
+		t.Fatalf("error = %v, want ErrInvalidCounter", err)
+	}
+}
+
+func TestEngineServiceAdjustRejectsOverflow(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	svc := cache.NewService(eng)
+	key := cache.Key{Namespace: "n", Space: "s", Key: "counter"}
+	maxInt64 := int64(^uint64(0) >> 1)
+
+	_, err := svc.Adjust(context.Background(), key, cache.AdjustOptions{
+		InitialValue: maxInt64,
+		Delta:        1,
+	})
+	if err == nil {
+		t.Fatal("adjust should fail for overflow value")
+	}
+	if !errors.Is(err, engine.ErrInvalidCounter) {
+		t.Fatalf("error = %v, want ErrInvalidCounter", err)
+	}
+}
+
 func TestEngineServiceNamespaceQuota(t *testing.T) {
 	eng := engine.NewMemory(engine.Config{ShardCount: 2})
 	defer closeEngine(t, eng)

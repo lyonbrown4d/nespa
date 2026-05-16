@@ -322,7 +322,39 @@ func TestClientServerAdjustRejectsInvalidValue(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected cachewire.Error, got %T: %v", err, err)
 	}
-	if wireErr.Code != protocol.ErrorInternal {
+	if wireErr.Code != protocol.ErrorInvalidArgument {
+		t.Fatalf("unexpected error code: %d", wireErr.Code)
+	}
+}
+
+func TestClientServerAdjustRejectsOverflow(t *testing.T) {
+	eng := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, eng)
+
+	server := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(eng))
+	ctx := context.Background()
+	if err := server.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start tcp server: %v", err)
+	}
+	defer stopServer(t, server)
+
+	client := cachetcp.NewClient()
+	key := cachewire.Key{Namespace: "ns", Space: "sp", Key: "overflow"}
+	maxInt64 := int64(^uint64(0) >> 1)
+
+	_, err := client.Adjust(ctx, server.Addr(), cachewire.AdjustRequest{
+		Key:          key,
+		InitialValue: maxInt64,
+		Delta:        1,
+	})
+	if err == nil {
+		t.Fatal("expected adjust overflow error")
+	}
+	wireErr, ok := errors.AsType[cachewire.Error](err)
+	if !ok {
+		t.Fatalf("expected cachewire.Error, got %T: %v", err, err)
+	}
+	if wireErr.Code != protocol.ErrorInvalidArgument {
 		t.Fatalf("unexpected error code: %d", wireErr.Code)
 	}
 }

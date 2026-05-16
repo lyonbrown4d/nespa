@@ -4,19 +4,17 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 )
 
 var (
-	ErrInvalidKey = errors.New("engine: invalid key")
-	ErrNotFound   = errors.New("engine: not found")
-	ErrClosed     = errors.New("engine: closed")
-	ErrNilContext = errors.New("engine: nil context")
+	ErrInvalidKey     = errors.New("engine: invalid key")
+	ErrNotFound       = errors.New("engine: not found")
+	ErrClosed         = errors.New("engine: closed")
+	ErrNilContext     = errors.New("engine: nil context")
+	ErrInvalidCounter = errors.New("engine: invalid counter value")
 )
-
-var invalidCounterValue = fmt.Errorf("engine: adjust value must be an int64")
 
 type Config struct {
 	ShardCount    int

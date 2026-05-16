@@ -35,6 +35,7 @@ const (
 	ErrorTimeout
 	ErrorUnavailable
 	ErrorInternal
+	ErrorInvalidArgument
 )
 
 type Op uint16

@@ -274,17 +274,17 @@ func addToCurrentCounter(raw []byte, delta int64) (int64, error) {
 	text := strings.TrimSpace(string(raw))
 	current, err := strconv.ParseInt(text, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("%w: parse int64 value: %w", invalidCounterValue, err)
+		return 0, fmt.Errorf("%w: parse int64 value: %w", ErrInvalidCounter, err)
 	}
 	return safeAdd(current, delta)
 }
 
 func safeAdd(base, delta int64) (int64, error) {
 	if delta > 0 && base > math.MaxInt64-delta {
-		return 0, fmt.Errorf("%w: overflow %d + %d", invalidCounterValue, base, delta)
+		return 0, fmt.Errorf("%w: overflow %d + %d", ErrInvalidCounter, base, delta)
 	}
 	if delta < 0 && base < math.MinInt64-delta {
-		return 0, fmt.Errorf("%w: overflow %d + %d", invalidCounterValue, base, delta)
+		return 0, fmt.Errorf("%w: overflow %d + %d", ErrInvalidCounter, base, delta)
 	}
 	return base + delta, nil
 }

@@ -29,6 +29,8 @@ func cacheErrorFrame(request protocol.Frame, err error) protocol.Frame {
 		return errorFrame(request, protocol.ErrorTooLarge, err)
 	case errors.Is(err, engine.ErrInvalidKey):
 		return errorFrame(request, protocol.ErrorBadFrame, err)
+	case errors.Is(err, engine.ErrInvalidCounter):
+		return errorFrame(request, protocol.ErrorInvalidArgument, err)
 	case errors.Is(err, context.DeadlineExceeded):
 		return errorFrame(request, protocol.ErrorTimeout, err)
 	case errors.Is(err, context.Canceled):
