@@ -79,6 +79,8 @@ type Service interface {
 	Exists(context.Context, Key, GetOptions) (bool, error)
 	Touch(context.Context, Key, TouchOptions) (bool, error)
 	Adjust(context.Context, Key, AdjustOptions) (SetResult, error)
+	Primitive(context.Context, PrimitiveRequest) (PrimitiveResult, error)
+	BatchPrimitive(context.Context, []PrimitiveRequest) ([]PrimitiveResult, error)
 	BatchSet(context.Context, []SetRequest) ([]SetResult, error)
 	BatchGet(context.Context, []GetRequest) ([]GetResult, error)
 	Stats(context.Context) (Stats, error)
@@ -219,6 +221,22 @@ func (s *EngineService) Adjust(ctx context.Context, key Key, opts AdjustOptions)
 		return SetResult{}, fmt.Errorf("adjust engine record: %w", err)
 	}
 	return SetResult{Record: record, Found: applied}, nil
+}
+
+func (s *EngineService) Primitive(ctx context.Context, request PrimitiveRequest) (PrimitiveResult, error) {
+	if request.Kind.Mutates() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
+	return s.executePrimitive(ctx, request)
+}
+
+func (s *EngineService) executePrimitive(ctx context.Context, request PrimitiveRequest) (PrimitiveResult, error) {
+	result, err := s.engine.Primitive(ctx, request)
+	if err != nil {
+		return PrimitiveResult{}, fmt.Errorf("execute engine primitive: %w", err)
+	}
+	return result, nil
 }
 
 func (s *EngineService) Stats(ctx context.Context) (Stats, error) {

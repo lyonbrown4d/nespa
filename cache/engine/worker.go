@@ -6,6 +6,20 @@ import (
 	"github.com/samber/oops"
 )
 
+type commandHandler func(*shardWorker, shardCommand) shardResult
+
+var commandHandlers = map[commandKind]commandHandler{
+	commandSet:       (*shardWorker).applySet,
+	commandGet:       (*shardWorker).applyGet,
+	commandDelete:    (*shardWorker).applyDelete,
+	commandTouch:     (*shardWorker).applyTouch,
+	commandAdjust:    (*shardWorker).applyAdjust,
+	commandPrimitive: (*shardWorker).applyPrimitive,
+	commandStats:     applyStatsCommand,
+	commandSweep:     applySweepCommand,
+	commandEvict:     applyEvictCommand,
+}
+
 func (s *shardWorker) run(done <-chan struct{}) {
 	for {
 		select {
@@ -18,29 +32,26 @@ func (s *shardWorker) run(done <-chan struct{}) {
 }
 
 func (s *shardWorker) apply(cmd shardCommand) shardResult {
-	switch cmd.kind {
-	case commandSet:
-		return s.applySet(cmd)
-	case commandGet:
-		return s.applyGet(cmd)
-	case commandDelete:
-		return s.applyDelete(cmd)
-	case commandTouch:
-		return s.applyTouch(cmd)
-	case commandAdjust:
-		return s.applyAdjust(cmd)
-	case commandStats:
-		return s.statsResult()
-	case commandSweep:
-		return shardResult{swept: s.sweepExpired(cmd.now)}
-	case commandEvict:
-		return shardResult{evicted: s.evict(cmd.evict)}
-	default:
+	handler, ok := commandHandlers[cmd.kind]
+	if !ok {
 		return shardResult{err: oops.Code("unknown_shard_command").
 			In("cache.engine").
 			With("kind", cmd.kind).
 			Errorf("engine: unknown shard command %d", cmd.kind)}
 	}
+	return handler(s, cmd)
+}
+
+func applyStatsCommand(s *shardWorker, _ shardCommand) shardResult {
+	return s.statsResult()
+}
+
+func applySweepCommand(s *shardWorker, cmd shardCommand) shardResult {
+	return shardResult{swept: s.sweepExpired(cmd.now)}
+}
+
+func applyEvictCommand(s *shardWorker, cmd shardCommand) shardResult {
+	return shardResult{evicted: s.evict(cmd.evict)}
 }
 
 func (s *shardWorker) statsResult() shardResult {
@@ -91,15 +102,7 @@ func (s *shardWorker) applySet(cmd shardCommand) shardResult {
 }
 
 func (s *shardWorker) replaceEntry(existing *entry, cmd shardCommand, expireAt time.Time, cost uint64) {
-	if cost >= existing.costBytes {
-		delta := cost - existing.costBytes
-		s.memoryBytes += delta
-		s.addSpaceUsage(spaceKeyOf(existing.key), 0, delta)
-	} else {
-		delta := existing.costBytes - cost
-		s.memoryBytes -= delta
-		s.subtractSpaceUsage(spaceKeyOf(existing.key), 0, delta)
-	}
+	s.replaceEntryCost(existing.key, existing.costBytes, cost)
 	existing.value = cmd.value
 	existing.version++
 	existing.namespaceVersion = cmd.setOpts.NamespaceVersion
@@ -109,6 +112,18 @@ func (s *shardWorker) replaceEntry(existing *entry, cmd shardCommand, expireAt t
 	existing.lastAccessAt = cmd.now
 	existing.accessCount++
 	existing.costBytes = cost
+}
+
+func (s *shardWorker) replaceEntryCost(key Key, oldCost, cost uint64) {
+	if cost >= oldCost {
+		delta := cost - oldCost
+		s.memoryBytes += delta
+		s.addSpaceUsage(spaceKeyOf(key), 0, delta)
+		return
+	}
+	delta := oldCost - cost
+	s.memoryBytes -= delta
+	s.subtractSpaceUsage(spaceKeyOf(key), 0, delta)
 }
 
 func (s *shardWorker) applyGet(cmd shardCommand) shardResult {

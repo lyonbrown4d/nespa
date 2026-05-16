@@ -11,11 +11,17 @@ import (
 )
 
 var (
-	ErrInvalidKey     = oops.Code("invalid_key").In("cache.engine").New("engine: invalid key")
-	ErrNotFound       = oops.Code("not_found").In("cache.engine").New("engine: not found")
-	ErrClosed         = oops.Code("closed").In("cache.engine").New("engine: closed")
-	ErrNilContext     = oops.Code("nil_context").In("cache.engine").New("engine: nil context")
-	ErrInvalidCounter = oops.Code("invalid_counter").In("cache.engine").New("engine: invalid counter value")
+	ErrInvalidKey       = oops.Code("invalid_key").In("cache.engine").New("engine: invalid key")
+	ErrNotFound         = oops.Code("not_found").In("cache.engine").New("engine: not found")
+	ErrClosed           = oops.Code("closed").In("cache.engine").New("engine: closed")
+	ErrNilContext       = oops.Code("nil_context").In("cache.engine").New("engine: nil context")
+	ErrInvalidCounter   = oops.Code("invalid_counter").In("cache.engine").New("engine: invalid counter value")
+	ErrInvalidPrimitive = oops.Code("invalid_primitive").
+				In("cache.engine").
+				New("engine: invalid primitive request")
+	ErrInvalidCollection = oops.Code("invalid_collection").
+				In("cache.engine").
+				New("engine: invalid collection value")
 )
 
 type Config struct {
@@ -137,6 +143,7 @@ type Engine interface {
 	Exists(context.Context, Key, GetOptions) (bool, error)
 	Touch(context.Context, Key, TouchOptions) (bool, error)
 	Adjust(context.Context, Key, AdjustOptions) (Record, bool, error)
+	Primitive(context.Context, PrimitiveRequest) (PrimitiveResult, error)
 	Stats(context.Context) (Stats, error)
 	SweepExpired(context.Context, time.Time) (uint64, error)
 	Evict(context.Context, EvictOptions) (EvictResult, error)
@@ -188,6 +195,7 @@ const (
 	commandDelete
 	commandTouch
 	commandAdjust
+	commandPrimitive
 	commandStats
 	commandSweep
 	commandEvict
@@ -202,6 +210,7 @@ type shardCommand struct {
 	getOpts    GetOptions
 	touch      TouchOptions
 	adjust     AdjustOptions
+	primitive  PrimitiveRequest
 	deleteOpts DeleteOptions
 	evict      EvictOptions
 	now        time.Time
@@ -209,15 +218,16 @@ type shardCommand struct {
 }
 
 type shardResult struct {
-	record  Record
-	found   bool
-	deleted bool
-	touched bool
-	stats   ShardStats
-	spaces  *collectionmapping.Map[spaceKey, spaceUsage]
-	swept   uint64
-	evicted EvictResult
-	err     error
+	record    Record
+	found     bool
+	deleted   bool
+	touched   bool
+	primitive PrimitiveResult
+	stats     ShardStats
+	spaces    *collectionmapping.Map[spaceKey, spaceUsage]
+	swept     uint64
+	evicted   EvictResult
+	err       error
 }
 
 type entry struct {

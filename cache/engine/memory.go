@@ -142,6 +142,26 @@ func (e *MemoryEngine) Adjust(ctx context.Context, key Key, opts AdjustOptions) 
 	return result.record, result.found, result.err
 }
 
+func (e *MemoryEngine) Primitive(ctx context.Context, request PrimitiveRequest) (PrimitiveResult, error) {
+	if err := validatePrimitiveRequest(request); err != nil {
+		return PrimitiveResult{}, err
+	}
+
+	request.Value = append([]byte(nil), request.Value...)
+	result, err := e.execute(ctx, shardCommand{
+		kind:      commandPrimitive,
+		physical:  physicalKey(request.Key),
+		key:       request.Key,
+		primitive: request,
+		now:       e.now(),
+		reply:     make(chan shardResult, 1),
+	})
+	if err != nil {
+		return PrimitiveResult{}, err
+	}
+	return result.primitive, result.err
+}
+
 func (e *MemoryEngine) Stats(ctx context.Context) (Stats, error) {
 	stats := Stats{Shards: make([]ShardStats, len(e.shards))}
 	spaces := collectionmapping.NewMap[spaceKey, spaceUsage]()

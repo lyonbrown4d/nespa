@@ -85,20 +85,8 @@ func (s *shardWorker) applyExistingCounter(cmd shardCommand, adjustment counterA
 	existing.accessCount++
 	existing.costBytes = cost
 
-	s.replaceCounterCost(cmd.key, oldCost, cost)
+	s.replaceEntryCost(cmd.key, oldCost, cost)
 	return shardResult{record: existing.record(), found: true}
-}
-
-func (s *shardWorker) replaceCounterCost(key Key, oldCost, cost uint64) {
-	if cost >= oldCost {
-		delta := cost - oldCost
-		s.memoryBytes += delta
-		s.addSpaceUsage(spaceKeyOf(key), 0, delta)
-		return
-	}
-	delta := oldCost - cost
-	s.memoryBytes -= delta
-	s.subtractSpaceUsage(spaceKeyOf(key), 0, delta)
 }
 
 func (s *shardWorker) applyNewCounter(cmd shardCommand, adjustment counterAdjustment) shardResult {

@@ -18,6 +18,8 @@ const (
 	oopsCodeInvalidKey         = "invalid_key"
 	oopsCodeInvalidCounter     = "invalid_counter"
 	oopsCodeInvalidCounterText = "invalid_counter_value"
+	oopsCodeInvalidPrimitive   = "invalid_primitive"
+	oopsCodeInvalidCollection  = "invalid_collection"
 	oopsCodeCounterOverflow    = "counter_overflow"
 )
 
@@ -36,7 +38,7 @@ func cacheErrorFrame(request protocol.Frame, err error) protocol.Frame {
 	switch {
 	case hasOopsCode(err, oopsCodeInvalidKey):
 		return errorFrame(request, protocol.ErrorBadFrame, err)
-	case hasOopsCode(err, oopsCodeInvalidCounter, oopsCodeInvalidCounterText, oopsCodeCounterOverflow):
+	case hasOopsCode(err, invalidArgumentOopsCodes()...):
 		return errorFrame(request, protocol.ErrorInvalidArgument, err)
 	case hasOopsCode(err, oopsCodeQuotaExceeded):
 		return errorFrame(request, protocol.ErrorTooLarge, err)
@@ -46,6 +48,16 @@ func cacheErrorFrame(request protocol.Frame, err error) protocol.Frame {
 		return errorFrame(request, protocol.ErrorUnavailable, err)
 	default:
 		return errorFrame(request, protocol.ErrorInternal, err)
+	}
+}
+
+func invalidArgumentOopsCodes() []string {
+	return []string{
+		oopsCodeInvalidCounter,
+		oopsCodeInvalidCounterText,
+		oopsCodeInvalidPrimitive,
+		oopsCodeInvalidCollection,
+		oopsCodeCounterOverflow,
 	}
 }
 

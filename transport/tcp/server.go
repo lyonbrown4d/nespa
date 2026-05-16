@@ -143,17 +143,19 @@ func (s *Server) dispatchFrame(ctx context.Context, frame protocol.Frame) protoc
 
 func (s *Server) cacheHandlers() map[protocol.Op]frameHandler {
 	return map[protocol.Op]frameHandler{
-		protocol.OpCacheSet:        s.handleSet,
-		protocol.OpCacheGet:        s.handleGet,
-		protocol.OpCacheDelete:     s.handleDelete,
-		protocol.OpCacheExists:     s.handleExists,
-		protocol.OpCacheTouch:      s.handleTouch,
-		protocol.OpCacheAdjust:     s.handleAdjust,
-		protocol.OpCacheBatchSet:   s.handleBatchSet,
-		protocol.OpCacheBatchGet:   s.handleBatchGet,
-		protocol.OpNodeHeartbeat:   s.handleUnsupportedFrame,
-		protocol.OpControlSnapshot: s.handleUnsupportedFrame,
-		protocol.OpControlWatch:    s.handleUnsupportedFrame,
+		protocol.OpCacheSet:            s.handleSet,
+		protocol.OpCacheGet:            s.handleGet,
+		protocol.OpCacheDelete:         s.handleDelete,
+		protocol.OpCacheExists:         s.handleExists,
+		protocol.OpCacheTouch:          s.handleTouch,
+		protocol.OpCacheAdjust:         s.handleAdjust,
+		protocol.OpCachePrimitive:      s.handlePrimitive,
+		protocol.OpCacheBatchSet:       s.handleBatchSet,
+		protocol.OpCacheBatchGet:       s.handleBatchGet,
+		protocol.OpCacheBatchPrimitive: s.handleBatchPrimitive,
+		protocol.OpNodeHeartbeat:       s.handleUnsupportedFrame,
+		protocol.OpControlSnapshot:     s.handleUnsupportedFrame,
+		protocol.OpControlWatch:        s.handleUnsupportedFrame,
 	}
 }
 

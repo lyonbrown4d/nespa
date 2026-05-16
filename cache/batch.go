@@ -41,3 +41,32 @@ func (s *EngineService) BatchGet(ctx context.Context, requests []GetRequest) ([]
 	}
 	return results, nil
 }
+
+func (s *EngineService) BatchPrimitive(
+	ctx context.Context,
+	requests []PrimitiveRequest,
+) ([]PrimitiveResult, error) {
+	if primitiveBatchMutates(requests) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
+
+	results := make([]PrimitiveResult, 0, len(requests))
+	for index := range requests {
+		result, err := s.executePrimitive(ctx, requests[index])
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func primitiveBatchMutates(requests []PrimitiveRequest) bool {
+	for index := range requests {
+		if requests[index].Kind.Mutates() {
+			return true
+		}
+	}
+	return false
+}

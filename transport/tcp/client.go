@@ -97,6 +97,26 @@ func (c *Client) Adjust(ctx context.Context, addr string, request cachewire.Adju
 	return decodeRecord(frame)
 }
 
+func (c *Client) Primitive(
+	ctx context.Context,
+	addr string,
+	request cachewire.PrimitiveRequest,
+) (cachewire.PrimitiveResult, error) {
+	metadata, payload, err := cachewire.EncodePrimitiveRequest(request)
+	if err != nil {
+		return cachewire.PrimitiveResult{}, fmt.Errorf("encode cache primitive request: %w", err)
+	}
+	frame, err := c.do(ctx, addr, protocol.OpCachePrimitive, request.RouteEpoch, metadata, payload)
+	if err != nil {
+		return cachewire.PrimitiveResult{}, err
+	}
+	out, decodeErr := cachewire.DecodePrimitiveResponse(frame.Metadata, frame.Payload)
+	if decodeErr != nil {
+		return out, fmt.Errorf("decode cache primitive response: %w", decodeErr)
+	}
+	return out, nil
+}
+
 func (c *Client) BatchSet(ctx context.Context, addr string, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
 	metadata, payload, err := cachewire.EncodeBatchSetRequest(request)
 	if err != nil {
@@ -122,6 +142,26 @@ func (c *Client) BatchGet(ctx context.Context, addr string, request cachewire.Ba
 	out, decodeErr := cachewire.DecodeBatchGetResponse(frame.Metadata, frame.Payload)
 	if decodeErr != nil {
 		return out, fmt.Errorf("decode cache batch get response: %w", decodeErr)
+	}
+	return out, nil
+}
+
+func (c *Client) BatchPrimitive(
+	ctx context.Context,
+	addr string,
+	request cachewire.BatchPrimitiveRequest,
+) (cachewire.BatchPrimitiveResponse, error) {
+	metadata, payload, err := cachewire.EncodeBatchPrimitiveRequest(request)
+	if err != nil {
+		return cachewire.BatchPrimitiveResponse{}, fmt.Errorf("encode cache batch primitive request: %w", err)
+	}
+	frame, err := c.do(ctx, addr, protocol.OpCacheBatchPrimitive, request.RouteEpoch, metadata, payload)
+	if err != nil {
+		return cachewire.BatchPrimitiveResponse{}, err
+	}
+	out, decodeErr := cachewire.DecodeBatchPrimitiveResponse(frame.Metadata, frame.Payload)
+	if decodeErr != nil {
+		return out, fmt.Errorf("decode cache batch primitive response: %w", decodeErr)
 	}
 	return out, nil
 }
