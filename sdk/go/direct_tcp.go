@@ -100,6 +100,21 @@ func (c *directTCPClient) Adjust(ctx context.Context, request cachewire.AdjustRe
 	return decodeDirectRecord(frame)
 }
 
+func (c *directTCPClient) Primitive(
+	ctx context.Context,
+	request cachewire.PrimitiveRequest,
+) (cachewire.PrimitiveResult, error) {
+	metadata, payload, err := cachewire.EncodePrimitiveRequest(request)
+	if err != nil {
+		return cachewire.PrimitiveResult{}, fmt.Errorf("encode cache primitive request: %w", err)
+	}
+	frame, err := c.do(ctx, protocol.OpCachePrimitive, request.RouteEpoch, metadata, payload)
+	if err != nil {
+		return cachewire.PrimitiveResult{}, fmt.Errorf("execute cache primitive: %w", err)
+	}
+	return decodeDirectPrimitiveResult(frame)
+}
+
 func (c *directTCPClient) BatchSet(ctx context.Context, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
 	metadata, payload, err := cachewire.EncodeBatchSetRequest(request)
 	if err != nil {
@@ -124,6 +139,25 @@ func (c *directTCPClient) BatchGet(ctx context.Context, request cachewire.BatchG
 	out, decodeErr := cachewire.DecodeBatchGetResponse(frame.Metadata, frame.Payload)
 	if decodeErr != nil {
 		return out, fmt.Errorf("decode cache batch get response: %w", decodeErr)
+	}
+	return out, nil
+}
+
+func (c *directTCPClient) BatchPrimitive(
+	ctx context.Context,
+	request cachewire.BatchPrimitiveRequest,
+) (cachewire.BatchPrimitiveResponse, error) {
+	metadata, payload, err := cachewire.EncodeBatchPrimitiveRequest(request)
+	if err != nil {
+		return cachewire.BatchPrimitiveResponse{}, fmt.Errorf("encode cache batch primitive request: %w", err)
+	}
+	frame, err := c.do(ctx, protocol.OpCacheBatchPrimitive, request.RouteEpoch, metadata, payload)
+	if err != nil {
+		return cachewire.BatchPrimitiveResponse{}, fmt.Errorf("batch execute cache primitives: %w", err)
+	}
+	out, decodeErr := cachewire.DecodeBatchPrimitiveResponse(frame.Metadata, frame.Payload)
+	if decodeErr != nil {
+		return out, fmt.Errorf("decode cache batch primitive response: %w", decodeErr)
 	}
 	return out, nil
 }
@@ -174,6 +208,14 @@ func decodeDirectRecord(frame protocol.Frame) (cachewire.Record, error) {
 	}
 	if len(frame.Payload) > 0 {
 		out.Value = append(out.Value[:0], frame.Payload...)
+	}
+	return out, nil
+}
+
+func decodeDirectPrimitiveResult(frame protocol.Frame) (cachewire.PrimitiveResult, error) {
+	out, err := cachewire.DecodePrimitiveResponse(frame.Metadata, frame.Payload)
+	if err != nil {
+		return out, fmt.Errorf("decode cache primitive response: %w", err)
 	}
 	return out, nil
 }

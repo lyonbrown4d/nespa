@@ -90,6 +90,25 @@ func TestDirectClientBatchGet(t *testing.T) {
 	requireSDKRecord(t, records[0], "value")
 }
 
+func TestDirectClientBatchPrimitive(t *testing.T) {
+	server := startSDKTCPServer(t)
+	sdk := newDirectClient(t, server)
+
+	results, err := sdk.BatchPrimitive(t.Context(), []nespa.PrimitiveRequest{
+		{Kind: nespa.PrimitiveCounterAdjust, Key: sdkPrimitiveKey("counter"), Delta: 1},
+		{Kind: nespa.PrimitiveMapSet, Key: sdkPrimitiveKey("profile"), Field: "name", Value: []byte("alice")},
+		{Kind: nespa.PrimitiveSetAdd, Key: sdkPrimitiveKey("tags"), Member: "blue"},
+		{Kind: nespa.PrimitiveScoredSetPut, Key: sdkPrimitiveKey("rank"), Member: "alice", Score: 10},
+		{Kind: nespa.PrimitiveMapGet, Key: sdkPrimitiveKey("profile"), Field: "name"},
+		{Kind: nespa.PrimitiveSetContains, Key: sdkPrimitiveKey("tags"), Member: "blue"},
+		{Kind: nespa.PrimitiveScoredSetRange, Key: sdkPrimitiveKey("rank")},
+	})
+	if err != nil {
+		t.Fatalf("batch primitive: %v", err)
+	}
+	requireSDKPrimitiveResults(t, results)
+}
+
 func TestErrorCodeOf(t *testing.T) {
 	err := fmt.Errorf("wrapped: %w", cachewire.Error{Code: nespa.ErrorInvalidArgument, Message: "bad counter"})
 
@@ -104,6 +123,29 @@ func TestErrorCodeOf(t *testing.T) {
 	if _, ok := nespa.ErrorCodeOf(errors.New("plain")); ok {
 		t.Fatal("plain error should not expose a wire error code")
 	}
+}
+
+func requireSDKPrimitiveResults(t *testing.T, results []nespa.PrimitiveResult) {
+	t.Helper()
+	if len(results) != 7 {
+		t.Fatalf("primitive results len = %d, want 7", len(results))
+	}
+	if string(results[0].Value) != "1" {
+		t.Fatalf("counter result = %+v", results[0])
+	}
+	if !results[4].Found || string(results[4].Value) != "alice" {
+		t.Fatalf("map get result = %+v", results[4])
+	}
+	if !results[5].Bool {
+		t.Fatalf("set contains result = %+v", results[5])
+	}
+	if len(results[6].ScoredMembers) != 1 || results[6].ScoredMembers[0].Member != "alice" {
+		t.Fatalf("scored range result = %+v", results[6])
+	}
+}
+
+func sdkPrimitiveKey(key string) nespa.Key {
+	return nespa.Key{Namespace: "orders", Space: "session", Key: key}
 }
 
 func newDirectClient(t *testing.T, server *cachetcp.Server) *nespa.Client {

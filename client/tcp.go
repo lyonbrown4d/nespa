@@ -84,10 +84,32 @@ func (c *TCPClient) Adjust(ctx context.Context, request cachewire.AdjustRequest)
 	return record, nil
 }
 
+func (c *TCPClient) Primitive(
+	ctx context.Context,
+	request cachewire.PrimitiveRequest,
+) (cachewire.PrimitiveResult, error) {
+	result, err := c.transport.Primitive(ctx, c.addr, request)
+	if err != nil {
+		return cachewire.PrimitiveResult{}, fmt.Errorf("execute cache primitive: %w", err)
+	}
+	return result, nil
+}
+
 func (c *TCPClient) BatchSet(ctx context.Context, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
 	response, err := c.transport.BatchSet(ctx, c.addr, request)
 	if err != nil {
 		return cachewire.BatchSetResponse{}, fmt.Errorf("batch set cache records: %w", err)
+	}
+	return response, nil
+}
+
+func (c *TCPClient) BatchPrimitive(
+	ctx context.Context,
+	request cachewire.BatchPrimitiveRequest,
+) (cachewire.BatchPrimitiveResponse, error) {
+	response, err := c.transport.BatchPrimitive(ctx, c.addr, request)
+	if err != nil {
+		return cachewire.BatchPrimitiveResponse{}, fmt.Errorf("batch execute cache primitives: %w", err)
 	}
 	return response, nil
 }

@@ -20,8 +20,10 @@ type rawClient interface {
 	Exists(context.Context, cachewire.ExistsRequest) (cachewire.ExistsResponse, error)
 	Touch(context.Context, cachewire.TouchRequest) (cachewire.TouchResponse, error)
 	Adjust(context.Context, cachewire.AdjustRequest) (cachewire.Record, error)
+	Primitive(context.Context, cachewire.PrimitiveRequest) (cachewire.PrimitiveResult, error)
 	BatchSet(context.Context, cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error)
 	BatchGet(context.Context, cachewire.BatchGetRequest) (cachewire.BatchGetResponse, error)
+	BatchPrimitive(context.Context, cachewire.BatchPrimitiveRequest) (cachewire.BatchPrimitiveResponse, error)
 }
 
 type refreshable interface {
