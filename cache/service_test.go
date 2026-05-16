@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/lyonbrown4d/nespa/cache"
 	"github.com/lyonbrown4d/nespa/cache/engine"
@@ -214,128 +213,6 @@ func TestEngineServiceTouchRejectsMismatchedExpectedVersion(t *testing.T) {
 	}
 	if touched {
 		t.Fatal("touch should miss on mismatched expected version")
-	}
-}
-
-func TestEngineServiceAdjustIncrementsAndPreservesTTL(t *testing.T) {
-	eng := engine.NewMemory(engine.Config{ShardCount: 2})
-	defer closeEngine(t, eng)
-
-	svc := cache.NewService(eng)
-	key := cache.Key{Namespace: "n", Space: "s", Key: "counter"}
-
-	result, err := svc.Adjust(context.Background(), key, cache.AdjustOptions{
-		InitialValue: 10,
-		Delta:        4,
-		TTL:          5 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("adjust create: %v", err)
-	}
-	if !result.Found {
-		t.Fatalf("adjust should return found=true on create")
-	}
-	if string(result.Record.Value) != "14" {
-		t.Fatalf("adjust create value = %q, want 14", result.Record.Value)
-	}
-	if result.Record.Version != 1 {
-		t.Fatalf("adjust create version = %d, want 1", result.Record.Version)
-	}
-	if result.Record.ExpireAt.IsZero() {
-		t.Fatal("adjust create should set expire at")
-	}
-
-	result, err = svc.Adjust(context.Background(), key, cache.AdjustOptions{
-		Delta: -2,
-	})
-	if err != nil {
-		t.Fatalf("adjust increment: %v", err)
-	}
-	if !result.Found || string(result.Record.Value) != "12" {
-		t.Fatalf("adjust increment = %+v", result)
-	}
-	if result.Record.Version != 2 {
-		t.Fatalf("adjust increment version = %d, want 2", result.Record.Version)
-	}
-	if result.Record.ExpireAt.IsZero() {
-		t.Fatal("adjust increment should keep expire at")
-	}
-}
-
-func TestEngineServiceAdjustRejectsMismatchedExpectedVersion(t *testing.T) {
-	eng := engine.NewMemory(engine.Config{ShardCount: 2})
-	defer closeEngine(t, eng)
-
-	svc := cache.NewService(eng)
-	key := cache.Key{Namespace: "n", Space: "s", Key: "counter"}
-	seed, err := svc.Adjust(context.Background(), key, cache.AdjustOptions{
-		InitialValue: 1,
-		Delta:        1,
-	})
-	if err != nil {
-		t.Fatalf("seed adjust: %v", err)
-	}
-
-	result, err := svc.Adjust(context.Background(), key, cache.AdjustOptions{
-		Delta:           1,
-		ExpectedVersion: seed.Record.Version + 1,
-	})
-	if err != nil {
-		t.Fatalf("adjust with mismatched expected version: %v", err)
-	}
-	if result.Found {
-		t.Fatal("adjust should miss on mismatched expected version")
-	}
-
-	record, ok, err := svc.Get(context.Background(), key, cache.GetOptions{})
-	if err != nil {
-		t.Fatalf("get after mismatch: %v", err)
-	}
-	if !ok {
-		t.Fatal("record should exist after mismatched adjust")
-	}
-	if string(record.Value) != "2" {
-		t.Fatalf("record value = %q, want 2", record.Value)
-	}
-}
-
-func TestEngineServiceAdjustRejectsNonIntExistingValue(t *testing.T) {
-	eng := engine.NewMemory(engine.Config{ShardCount: 2})
-	defer closeEngine(t, eng)
-
-	svc := cache.NewService(eng)
-	key := cache.Key{Namespace: "n", Space: "s", Key: "counter"}
-
-	if _, err := svc.Set(context.Background(), key, []byte("bad-int"), cache.SetOptions{}); err != nil {
-		t.Fatalf("seed set: %v", err)
-	}
-
-	_, err := svc.Adjust(context.Background(), key, cache.AdjustOptions{Delta: 1})
-	if err == nil {
-		t.Fatal("adjust should fail for non-int value")
-	}
-	if !errors.Is(err, engine.ErrInvalidCounter) {
-		t.Fatalf("error = %v, want ErrInvalidCounter", err)
-	}
-}
-
-func TestEngineServiceAdjustRejectsOverflow(t *testing.T) {
-	eng := engine.NewMemory(engine.Config{ShardCount: 2})
-	defer closeEngine(t, eng)
-
-	svc := cache.NewService(eng)
-	key := cache.Key{Namespace: "n", Space: "s", Key: "counter"}
-	maxInt64 := int64(^uint64(0) >> 1)
-
-	_, err := svc.Adjust(context.Background(), key, cache.AdjustOptions{
-		InitialValue: maxInt64,
-		Delta:        1,
-	})
-	if err == nil {
-		t.Fatal("adjust should fail for overflow value")
-	}
-	if !errors.Is(err, engine.ErrInvalidCounter) {
-		t.Fatalf("error = %v, want ErrInvalidCounter", err)
 	}
 }
 

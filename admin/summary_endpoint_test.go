@@ -1,9 +1,10 @@
-package admin
+package admin_test
 
 import (
 	"context"
 	"testing"
 
+	"github.com/lyonbrown4d/nespa/admin"
 	"github.com/lyonbrown4d/nespa/cache"
 	"github.com/lyonbrown4d/nespa/controlapi"
 	"github.com/lyonbrown4d/nespa/runtime"
@@ -40,7 +41,28 @@ func (f fakeSummaryNodeService) RouteEpoch() uint64 {
 	return f.routeEpoch
 }
 
+type summaryEndpointForTest interface {
+	Summary(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[admin.SummaryBody], error)
+}
+
 func TestSummaryReturnsRuntimeStats(t *testing.T) {
+	endpoint := newSummaryEndpointForTest(t)
+
+	got, err := endpoint.Summary(context.Background(), &runtime.EmptyInput{})
+	if err != nil {
+		t.Fatalf("Summary() error = %v", err)
+	}
+	if got == nil {
+		t.Fatal("Summary() returned nil response")
+	}
+
+	assertSummaryClusterStats(t, got.Body)
+	assertSummaryCacheStats(t, got.Body)
+}
+
+func newSummaryEndpointForTest(t *testing.T) summaryEndpointForTest {
+	t.Helper()
+
 	cachedSvc := fakeSummaryCacheService{
 		stats: cache.Stats{
 			Objects:       3,
@@ -73,22 +95,16 @@ func TestSummaryReturnsRuntimeStats(t *testing.T) {
 		routeEpoch: 7,
 	}
 
-	endpoint := &summaryEndpoint{
-		cfg:        Config{ControlAddr: "127.0.0.1:7401"},
-		cacheSvc:   cachedSvc,
-		controlSvc: controlSvc,
-		nodeSvc:    nodeSvc,
+	endpoint, ok := admin.NewSummaryEndpoint(admin.Config{ControlAddr: "127.0.0.1:7401"}, cachedSvc, controlSvc, nodeSvc).(summaryEndpointForTest)
+	if !ok {
+		t.Fatal("summary endpoint does not expose Summary")
 	}
+	return endpoint
+}
 
-	got, err := endpoint.Summary(context.Background(), &runtime.EmptyInput{})
-	if err != nil {
-		t.Fatalf("Summary() error = %v", err)
-	}
-	if got == nil {
-		t.Fatal("Summary() returned nil response")
-	}
+func assertSummaryClusterStats(t *testing.T, body admin.SummaryBody) {
+	t.Helper()
 
-	body := got.Body
 	if body.ControlAddr != "127.0.0.1:7401" {
 		t.Fatalf("control_addr = %q, want 127.0.0.1:7401", body.ControlAddr)
 	}
@@ -104,6 +120,11 @@ func TestSummaryReturnsRuntimeStats(t *testing.T) {
 	if body.NodeRouteEpoch != 7 {
 		t.Fatalf("node_route_epoch = %d, want 7", body.NodeRouteEpoch)
 	}
+}
+
+func assertSummaryCacheStats(t *testing.T, body admin.SummaryBody) {
+	t.Helper()
+
 	if body.CacheObjects != 3 || body.CacheMemory != 128 {
 		t.Fatalf("cache stats = %+v", body)
 	}

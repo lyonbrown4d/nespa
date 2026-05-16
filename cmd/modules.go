@@ -82,8 +82,9 @@ func endpointListValues[E httpx.Endpoint](endpoints *collectionlist.List[E]) []h
 	return out
 }
 
-func controlModule() dix.Module {
+func controlModule(enabled bool) dix.Module {
 	return dix.NewModule("control",
+		dix.Disabled(!enabled),
 		dix.WithModuleProviders(
 			dix.Provider2(control.NewServiceRuntimeWithEvents),
 			dix.Contribute1[control.Endpoint, *control.ServiceRuntime](control.NewReadEndpoint, dix.Order(10)),
@@ -100,8 +101,9 @@ func controlModule() dix.Module {
 	)
 }
 
-func frontendModule() dix.Module {
+func frontendModule(enabled bool) dix.Module {
 	return dix.NewModule("frontend",
+		dix.Disabled(!enabled),
 		dix.WithModuleProviders(
 			dix.Provider1(frontend.NewServiceRuntime),
 			dix.ProviderErr2(frontend.NewWebServer),
@@ -118,7 +120,11 @@ func frontendModule() dix.Module {
 	)
 }
 
-func nodeModule() dix.Module {
+func nodeModule(enabled bool) dix.Module {
+	if !enabled {
+		return dix.NewModule("node", dix.Disabled(true))
+	}
+
 	eng := engine.NewMemory(engine.Config{
 		ShardCount:    16,
 		SweepInterval: time.Second,
@@ -155,8 +161,9 @@ func nodeModule() dix.Module {
 	)
 }
 
-func adminModule() dix.Module {
+func adminModule(enabled bool) dix.Module {
 	return dix.NewModule("admin",
+		dix.Disabled(!enabled),
 		dix.WithModuleProviders(
 			dix.Provider4[admin.Endpoint, admin.Config, cache.Service, *control.ServiceRuntime, *node.ServiceRuntime](
 				func(

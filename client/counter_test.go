@@ -87,11 +87,11 @@ func TestTCPClientCounterRejectsNonIntValue(t *testing.T) {
 		Space:     "session",
 		Key:       "counter-non-int",
 	}
-	if _, err := transportClient.Set(ctx, server.Addr(), cachewire.SetRequest{
+	if _, seedErr := transportClient.Set(ctx, server.Addr(), cachewire.SetRequest{
 		Key:   key,
 		Value: []byte("abc"),
-	}); err != nil {
-		t.Fatalf("seed set: %v", err)
+	}); seedErr != nil {
+		t.Fatalf("seed set: %v", seedErr)
 	}
 
 	_, err = cacheClient.Counter(ctx, client.CounterRequest{
@@ -136,18 +136,11 @@ func TestRoutedTCPClientCounterUsesRouteVersions(t *testing.T) {
 		Space:     "session",
 		Key:       "counter-route",
 	}
-	if _, err := transportClient.Set(ctx, server.Addr(), cachewire.SetRequest{
-		Key:              key,
-		Value:            []byte("1"),
-		NamespaceVersion: 1,
-		SpaceVersion:     1,
-	}); err != nil {
-		t.Fatalf("seed set: %v", err)
-	}
+	seedRouteCounter(ctx, t, transportClient, server.Addr(), key)
 
 	control.Set(snapshotFor(server.Addr(), 2, 2))
-	if err := routed.Refresh(ctx); err != nil {
-		t.Fatalf("refresh snapshot: %v", err)
+	if refreshErr := routed.Refresh(ctx); refreshErr != nil {
+		t.Fatalf("refresh snapshot: %v", refreshErr)
 	}
 
 	result, err := routed.Counter(ctx, client.CounterRequest{
@@ -162,12 +155,7 @@ func TestRoutedTCPClientCounterUsesRouteVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("counter: %v", err)
 	}
-	if result.Value != 1 {
-		t.Fatalf("result value = %d, want 1", result.Value)
-	}
-	if result.Record.NamespaceVersion != 2 || result.Record.SpaceVersion != 2 {
-		t.Fatalf("record versions = %d/%d, want 2/2", result.Record.NamespaceVersion, result.Record.SpaceVersion)
-	}
+	requireCounterResult(t, result, 1, 2, 2)
 
 	record, err := transportClient.Get(ctx, server.Addr(), cachewire.GetRequest{
 		Key: key,
@@ -177,5 +165,28 @@ func TestRoutedTCPClientCounterUsesRouteVersions(t *testing.T) {
 	}
 	if !record.Found || string(record.Value) != "1" {
 		t.Fatalf("record = %+v, want found value 1", record)
+	}
+}
+
+func seedRouteCounter(ctx context.Context, t *testing.T, transportClient *cachetcp.Client, addr string, key cachewire.Key) {
+	t.Helper()
+	_, err := transportClient.Set(ctx, addr, cachewire.SetRequest{
+		Key:              key,
+		Value:            []byte("1"),
+		NamespaceVersion: 1,
+		SpaceVersion:     1,
+	})
+	if err != nil {
+		t.Fatalf("seed set: %v", err)
+	}
+}
+
+func requireCounterResult(t *testing.T, result client.CounterResult, value int64, namespaceVersion, spaceVersion uint64) {
+	t.Helper()
+	if result.Value != value {
+		t.Fatalf("result value = %d, want %d", result.Value, value)
+	}
+	if result.Record.NamespaceVersion != namespaceVersion || result.Record.SpaceVersion != spaceVersion {
+		t.Fatalf("record versions = %d/%d, want %d/%d", result.Record.NamespaceVersion, result.Record.SpaceVersion, namespaceVersion, spaceVersion)
 	}
 }

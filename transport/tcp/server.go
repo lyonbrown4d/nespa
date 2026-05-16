@@ -30,6 +30,8 @@ type Server struct {
 	wg       sync.WaitGroup
 }
 
+type frameHandler func(context.Context, protocol.Frame) protocol.Frame
+
 func NewServer(cfg ServerConfig, service cache.Service) *Server {
 	return &Server{
 		addr:              cfg.Addr,
@@ -132,28 +134,31 @@ func (s *Server) handleFrame(ctx context.Context, frame protocol.Frame) protocol
 }
 
 func (s *Server) dispatchFrame(ctx context.Context, frame protocol.Frame) protocol.Frame {
-	switch frame.Op {
-	case protocol.OpCacheSet:
-		return s.handleSet(ctx, frame)
-	case protocol.OpCacheGet:
-		return s.handleGet(ctx, frame)
-	case protocol.OpCacheDelete:
-		return s.handleDelete(ctx, frame)
-	case protocol.OpCacheExists:
-		return s.handleExists(ctx, frame)
-	case protocol.OpCacheTouch:
-		return s.handleTouch(ctx, frame)
-	case protocol.OpCacheAdjust:
-		return s.handleAdjust(ctx, frame)
-	case protocol.OpCacheBatchSet:
-		return s.handleBatchSet(ctx, frame)
-	case protocol.OpCacheBatchGet:
-		return s.handleBatchGet(ctx, frame)
-	case protocol.OpNodeHeartbeat, protocol.OpControlSnapshot, protocol.OpControlWatch:
-		return errorFrame(frame, protocol.ErrorBadFrame, fmt.Errorf("unsupported cache op %d", frame.Op))
-	default:
+	handler, ok := s.cacheHandlers()[frame.Op]
+	if !ok {
 		return errorFrame(frame, protocol.ErrorBadFrame, fmt.Errorf("unsupported cache op %d", frame.Op))
 	}
+	return handler(ctx, frame)
+}
+
+func (s *Server) cacheHandlers() map[protocol.Op]frameHandler {
+	return map[protocol.Op]frameHandler{
+		protocol.OpCacheSet:        s.handleSet,
+		protocol.OpCacheGet:        s.handleGet,
+		protocol.OpCacheDelete:     s.handleDelete,
+		protocol.OpCacheExists:     s.handleExists,
+		protocol.OpCacheTouch:      s.handleTouch,
+		protocol.OpCacheAdjust:     s.handleAdjust,
+		protocol.OpCacheBatchSet:   s.handleBatchSet,
+		protocol.OpCacheBatchGet:   s.handleBatchGet,
+		protocol.OpNodeHeartbeat:   s.handleUnsupportedFrame,
+		protocol.OpControlSnapshot: s.handleUnsupportedFrame,
+		protocol.OpControlWatch:    s.handleUnsupportedFrame,
+	}
+}
+
+func (s *Server) handleUnsupportedFrame(_ context.Context, frame protocol.Frame) protocol.Frame {
+	return errorFrame(frame, protocol.ErrorBadFrame, fmt.Errorf("unsupported cache op %d", frame.Op))
 }
 
 func (s *Server) staleRoute(routeEpoch uint64) (bool, uint64) {

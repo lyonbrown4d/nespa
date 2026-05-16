@@ -9,75 +9,81 @@ import (
 )
 
 func TestApplyCounterRetriesWhenSetVersionMismatches(t *testing.T) {
-	getCalls := 0
-	setCalls := 0
-	var setExpectedVersions []uint64
-
-	get := func(context.Context, cachewire.GetRequest) (cachewire.Record, error) {
-		getCalls++
-		switch getCalls {
-		case 1:
-			return cachewire.Record{
-				Found:            true,
-				Value:            []byte("10"),
-				Version:          1,
-				NamespaceVersion: 3,
-				SpaceVersion:     4,
-			}, nil
-		case 2:
-			return cachewire.Record{
-				Found:            true,
-				Value:            []byte("10"),
-				Version:          2,
-				NamespaceVersion: 3,
-				SpaceVersion:     4,
-			}, nil
-		default:
-			return cachewire.Record{}, errors.New("unexpected get call")
-		}
-	}
-
-	set := func(_ context.Context, request cachewire.SetRequest) (cachewire.Record, error) {
-		setCalls++
-		setExpectedVersions = append(setExpectedVersions, request.ExpectedVersion)
-
-		if request.ExpectedVersion == 1 {
-			return cachewire.Record{Found: false}, nil
-		}
-
-		return cachewire.Record{
-			Found:            true,
-			Version:          3,
-			NamespaceVersion: request.NamespaceVersion,
-			SpaceVersion:     request.SpaceVersion,
-		}, nil
-	}
+	script := &retryCounterScript{}
 
 	result, err := applyCounter(context.Background(), CounterRequest{
 		Key:        cachewire.Key{Namespace: "ns", Space: "sp", Key: "k"},
 		Delta:      1,
 		MaxRetries: 3,
-	}, get, set)
+	}, script.get, script.set)
 	if err != nil {
 		t.Fatalf("applyCounter: %v", err)
 	}
+	script.assert(t, result)
+}
+
+type retryCounterScript struct {
+	getCalls            int
+	setCalls            int
+	setExpectedVersions []uint64
+}
+
+func (s *retryCounterScript) get(context.Context, cachewire.GetRequest) (cachewire.Record, error) {
+	s.getCalls++
+	switch s.getCalls {
+	case 1:
+		return counterRecord(1), nil
+	case 2:
+		return counterRecord(2), nil
+	default:
+		return cachewire.Record{}, errors.New("unexpected get call")
+	}
+}
+
+func (s *retryCounterScript) set(_ context.Context, request cachewire.SetRequest) (cachewire.Record, error) {
+	s.setCalls++
+	s.setExpectedVersions = append(s.setExpectedVersions, request.ExpectedVersion)
+	if request.ExpectedVersion == 1 {
+		return cachewire.Record{Found: false}, nil
+	}
+	return cachewire.Record{
+		Found:            true,
+		Version:          3,
+		NamespaceVersion: request.NamespaceVersion,
+		SpaceVersion:     request.SpaceVersion,
+	}, nil
+}
+
+func (s *retryCounterScript) assert(t *testing.T, result CounterResult) {
+	t.Helper()
+
 	if result.Value != 11 {
 		t.Fatalf("result value = %d, want 11", result.Value)
 	}
-	if getCalls != 2 {
-		t.Fatalf("get calls = %d, want 2", getCalls)
+	if s.getCalls != 2 {
+		t.Fatalf("get calls = %d, want 2", s.getCalls)
 	}
-	if setCalls != 2 {
-		t.Fatalf("set calls = %d, want 2", setCalls)
+	if s.setCalls != 2 {
+		t.Fatalf("set calls = %d, want 2", s.setCalls)
 	}
-	if len(setExpectedVersions) != 2 {
-		t.Fatalf("set expected versions = %d, want 2", len(setExpectedVersions))
+	if len(s.setExpectedVersions) != 2 {
+		t.Fatalf("set expected versions = %d, want 2", len(s.setExpectedVersions))
 	}
-	if setExpectedVersions[0] != 1 || setExpectedVersions[1] != 2 {
-		t.Fatalf("set expected versions = %#v, want [1 2]", setExpectedVersions)
+	if s.setExpectedVersions[0] != 1 || s.setExpectedVersions[1] != 2 {
+		t.Fatalf("set expected versions = %#v, want [1 2]", s.setExpectedVersions)
 	}
 	if result.Record.NamespaceVersion != 3 || result.Record.SpaceVersion != 4 {
 		t.Fatalf("record versions = %d/%d, want 3/4", result.Record.NamespaceVersion, result.Record.SpaceVersion)
+	}
+}
+
+func counterRecord(version uint64) cachewire.Record {
+	return cachewire.Record{
+		Found:            true,
+		Value:            []byte("10"),
+		Version:          version,
+		NamespaceVersion: 3,
+		SpaceVersion:     4,
 	}
 }
 

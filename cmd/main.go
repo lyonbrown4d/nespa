@@ -219,19 +219,11 @@ func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags
 		foundationModule(logger),
 		configModule(flags),
 		bannerModule(stdout),
+		controlModule(cfg.Control.Enabled),
+		nodeModule(cfg.Node.Enabled),
+		frontendModule(cfg.Frontend.Enabled),
+		adminModule(cfg.Admin.Enabled),
 	)
-	if cfg.Control.Enabled {
-		modules.Add(controlModule())
-	}
-	if cfg.Node.Enabled {
-		modules.Add(nodeModule())
-	}
-	if cfg.Frontend.Enabled {
-		modules.Add(frontendModule())
-	}
-	if cfg.Admin.Enabled {
-		modules.Add(adminModule())
-	}
 
 	app := dix.New("nespa",
 		dix.WithLogger(logger),
