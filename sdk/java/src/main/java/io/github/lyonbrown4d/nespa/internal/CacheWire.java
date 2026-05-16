@@ -4,6 +4,8 @@ import io.github.lyonbrown4d.nespa.AdjustOptions;
 import io.github.lyonbrown4d.nespa.DeleteOptions;
 import io.github.lyonbrown4d.nespa.GetOptions;
 import io.github.lyonbrown4d.nespa.Key;
+import io.github.lyonbrown4d.nespa.PrimitiveRequest;
+import io.github.lyonbrown4d.nespa.PrimitiveResult;
 import io.github.lyonbrown4d.nespa.Record;
 import io.github.lyonbrown4d.nespa.SetOptions;
 import io.github.lyonbrown4d.nespa.TouchOptions;
@@ -11,6 +13,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 public final class CacheWire {
     private static final byte METADATA_VERSION = 1;
@@ -108,14 +111,30 @@ public final class CacheWire {
         return value;
     }
 
-    private static long millis(java.time.Duration ttl) {
+    public static WirePayload encodePrimitiveRequest(PrimitiveRequest request) {
+        return PrimitiveWire.encodeRequest(request);
+    }
+
+    public static PrimitiveResult decodePrimitiveResponse(byte[] metadata, byte[] payload) {
+        return PrimitiveWire.decodeResponse(metadata, payload);
+    }
+
+    public static WirePayload encodeBatchPrimitiveRequest(List<PrimitiveRequest> requests) {
+        return PrimitiveWire.encodeBatchRequest(requests);
+    }
+
+    public static List<PrimitiveResult> decodeBatchPrimitiveResponse(byte[] metadata, byte[] payload) {
+        return PrimitiveWire.decodeBatchResponse(metadata, payload);
+    }
+
+    static long millis(java.time.Duration ttl) {
         if (ttl == null || ttl.isZero() || ttl.isNegative()) {
             return 0;
         }
         return ttl.toMillis();
     }
 
-    private static final class Writer {
+    static final class Writer {
         private final ByteArrayOutputStream out = new ByteArrayOutputStream();
 
         Writer() {
@@ -143,6 +162,22 @@ public final class CacheWire {
             out.writeBytes(ByteBuffer.allocate(Long.BYTES).order(ByteOrder.BIG_ENDIAN).putLong(value).array());
         }
 
+        void writeUint32(int value) {
+            out.writeBytes(ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.BIG_ENDIAN).putInt(value).array());
+        }
+
+        void writeByte(int value) {
+            out.write(value);
+        }
+
+        void writeBool(boolean value) {
+            writeByte(value ? BOOL_TRUE : BOOL_FALSE);
+        }
+
+        void writeFloat64(double value) {
+            out.writeBytes(ByteBuffer.allocate(Double.BYTES).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
+        }
+
         void writeInt64(long value) {
             long encoded = value << 1;
             if (value < 0) {
@@ -160,7 +195,7 @@ public final class CacheWire {
         }
     }
 
-    private static final class Reader {
+    static final class Reader {
         private final byte[] raw;
         private int pos;
 
@@ -203,6 +238,20 @@ public final class CacheWire {
             return value;
         }
 
+        int readUint32() {
+            ensureAvailable(Integer.BYTES);
+            int value = ByteBuffer.wrap(raw, pos, Integer.BYTES).order(ByteOrder.BIG_ENDIAN).getInt();
+            pos += Integer.BYTES;
+            return value;
+        }
+
+        double readFloat64() {
+            ensureAvailable(Double.BYTES);
+            double value = ByteBuffer.wrap(raw, pos, Double.BYTES).order(ByteOrder.BIG_ENDIAN).getDouble();
+            pos += Double.BYTES;
+            return value;
+        }
+
         long readInt64() {
             long value = readUvarint();
             long decoded = value >>> 1;
@@ -235,7 +284,7 @@ public final class CacheWire {
             }
         }
 
-        private byte readByte() {
+        byte readByte() {
             ensureAvailable(1);
             return raw[pos++];
         }

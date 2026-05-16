@@ -23,6 +23,8 @@ public final class Protocol {
     public static final int OP_CACHE_EXISTS = 9;
     public static final int OP_CACHE_TOUCH = 10;
     public static final int OP_CACHE_ADJUST = 11;
+    public static final int OP_CACHE_PRIMITIVE = 12;
+    public static final int OP_CACHE_BATCH_PRIMITIVE = 13;
 
     public static final int FLAG_RESPONSE = 1;
     public static final int FLAG_ERROR = 2;

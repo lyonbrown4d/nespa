@@ -5,6 +5,7 @@ import io.github.lyonbrown4d.nespa.internal.Frame;
 import io.github.lyonbrown4d.nespa.internal.NespaFrameCodec;
 import io.github.lyonbrown4d.nespa.internal.Protocol;
 import io.github.lyonbrown4d.nespa.internal.ResponseHandler;
+import io.github.lyonbrown4d.nespa.internal.WirePayload;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
@@ -21,6 +22,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -84,6 +86,20 @@ public class DirectCacheClient implements CacheClient {
         AdjustOptions next = options == null ? AdjustOptions.builder().build() : options;
         Frame frame = send(Protocol.OP_CACHE_ADJUST, 0, CacheWire.encodeAdjustRequest(key, next), new byte[0]);
         return CacheWire.decodeRecord(frame.getMetadata(), frame.getPayload());
+    }
+
+    @Override
+    public PrimitiveResult primitive(PrimitiveRequest request) throws IOException {
+        WirePayload wire = CacheWire.encodePrimitiveRequest(request);
+        Frame frame = send(Protocol.OP_CACHE_PRIMITIVE, 0, wire.metadata(), wire.payload());
+        return CacheWire.decodePrimitiveResponse(frame.getMetadata(), frame.getPayload());
+    }
+
+    @Override
+    public List<PrimitiveResult> batchPrimitive(List<PrimitiveRequest> requests) throws IOException {
+        WirePayload wire = CacheWire.encodeBatchPrimitiveRequest(requests);
+        Frame frame = send(Protocol.OP_CACHE_BATCH_PRIMITIVE, 0, wire.metadata(), wire.payload());
+        return CacheWire.decodeBatchPrimitiveResponse(frame.getMetadata(), frame.getPayload());
     }
 
     @Override

@@ -1,6 +1,7 @@
 package io.github.lyonbrown4d.nespa;
 
 import java.io.IOException;
+import java.util.List;
 
 public interface CacheClient extends AutoCloseable {
     Record set(Key key, byte[] value, SetOptions options) throws IOException;
@@ -14,6 +15,10 @@ public interface CacheClient extends AutoCloseable {
     boolean touch(Key key, TouchOptions options) throws IOException;
 
     Record adjust(Key key, AdjustOptions options) throws IOException;
+
+    PrimitiveResult primitive(PrimitiveRequest request) throws IOException;
+
+    List<PrimitiveResult> batchPrimitive(List<PrimitiveRequest> requests) throws IOException;
 
     @Override
     void close();
