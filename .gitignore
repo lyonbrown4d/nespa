@@ -44,7 +44,6 @@ gen
 *.dylib
 *.test
 *.out
-go.work
 Thumbs.db
 Thumbs.db:encryptable
 ehthumbs.db
@@ -81,3 +80,10 @@ dist
 test/node_modules
 test/build
 tmp
+
+# Gradle
+.gradle/
+**/.gradle/
+build/
+**/build/
+.gradle-bootstrap/
