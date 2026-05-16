@@ -139,7 +139,7 @@ snapshot and retries the operation once.
 The frontend does not proxy cache reads or writes.
 
 Current hot-path ops are `CacheGet`, `CacheSet`, `CacheDelete`, `CacheExists`,
-`CacheTouch`, `CacheBatchGet`, and `CacheBatchSet`.
+`CacheTouch`, `CacheAdjust`, `CacheBatchGet`, and `CacheBatchSet`.
 
 The current frame header is fixed-width and big-endian:
 
@@ -162,7 +162,7 @@ JSON. Batch set/get metadata stores payload offsets so values do not need to be
 JSON encoded. DataNodes reject non-zero `route_epoch` values older than the
 node's latest observed control revision. The frame codec lives in `protocol`.
 
-The data plane is intentionally a versioned binary KV plane (`set/get/delete/exists/touch`
+The data plane is intentionally a versioned binary KV plane (`set/get/delete/exists/touch/adjust`
 and batch variants). Redis command compatibility and native Redis data-structure
 operations are not part of this stage.
 
