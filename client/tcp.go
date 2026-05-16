@@ -3,15 +3,15 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/lyonbrown4d/nespa/cachewire"
 	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
+	"github.com/samber/oops"
 )
 
-var ErrInvalidConfig = errors.New("client: invalid config")
+var ErrInvalidConfig = oops.Code("invalid_config").In("client").New("client: invalid config")
 
 type Config struct {
 	Addr string
@@ -25,7 +25,10 @@ type TCPClient struct {
 func NewTCP(cfg Config) (*TCPClient, error) {
 	addr := strings.TrimSpace(cfg.Addr)
 	if addr == "" {
-		return nil, ErrInvalidConfig
+		return nil, oops.Code("invalid_config").
+			In("client").
+			With("addr", cfg.Addr).
+			Wrap(ErrInvalidConfig)
 	}
 	return &TCPClient{
 		addr:      addr,

@@ -24,7 +24,7 @@ func TestControlStateCreatesNamespaceAndSpaceMetadata(t *testing.T) {
 	}
 	assertNamespaceResponse(t, again, 1, "orders")
 
-	space, err := state.CreateSpace("orders", "session")
+	space, err := state.CreateSpace(t.Context(), "orders", "session")
 	if err != nil {
 		t.Fatalf("create space: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestControlStateCreatesNamespaceAndSpaceMetadata(t *testing.T) {
 func TestControlStateCreateSpaceRequiresNamespace(t *testing.T) {
 	state := control.NewControlState("test")
 
-	_, err := state.CreateSpace("orders", "session")
+	_, err := state.CreateSpace(t.Context(), "orders", "session")
 	if !errors.Is(err, control.ErrNamespaceNotFound) {
 		t.Fatalf("err = %v, want ErrNamespaceNotFound", err)
 	}
@@ -145,7 +145,7 @@ func TestControlStateRejectsInvalidCatalogNames(t *testing.T) {
 			if test.createNamespace {
 				_, err = state.CreateNamespace(test.namespace)
 			} else {
-				_, err = state.CreateSpace(test.namespace, test.space)
+				_, err = state.CreateSpace(t.Context(), test.namespace, test.space)
 			}
 			if !errors.Is(err, test.want) {
 				t.Fatalf("err = %v, want %v", err, test.want)
@@ -194,6 +194,23 @@ func TestControlStateSnapshotBuildsSpaceScopedRoutes(t *testing.T) {
 	assertSpaceRoute(t, snapshot.Routes[1], "orders", "session", "node-2", 32768, controlapi.VSlotMax)
 }
 
+func TestControlStateRecordsSpaceRouteEvent(t *testing.T) {
+	state := control.NewControlStateWithClock("test", func() time.Time { return time.Unix(123, 0) })
+	registerNode(t, state)
+	if _, err := state.CreateNamespace("orders"); err != nil {
+		t.Fatalf("create namespace: %v", err)
+	}
+	if _, err := state.CreateSpace(t.Context(), "orders", "session"); err != nil {
+		t.Fatalf("create space: %v", err)
+	}
+
+	events := state.RebalanceEvents()
+	last := events.Events[len(events.Events)-1]
+	if last.Reason != "space_created" || last.Namespace != "orders" || last.Space != "session" || last.RouteCount != 1 {
+		t.Fatalf("space event = %+v", last)
+	}
+}
+
 func assertNamespaceResponse(t *testing.T, response controlapi.CreateNamespaceResponse, revision uint64, namespace string) {
 	t.Helper()
 	if response.Revision != revision || response.Namespace.Namespace != namespace || response.Namespace.Version != 1 {
@@ -226,7 +243,7 @@ func createOrdersSession(t *testing.T, state *control.ControlState) {
 	if _, err := state.CreateNamespace("orders"); err != nil {
 		t.Fatalf("create namespace: %v", err)
 	}
-	if _, err := state.CreateSpace("orders", "session"); err != nil {
+	if _, err := state.CreateSpace(t.Context(), "orders", "session"); err != nil {
 		t.Fatalf("create space: %v", err)
 	}
 }

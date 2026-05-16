@@ -11,11 +11,12 @@ import (
 	"github.com/lyonbrown4d/nespa/protocol"
 	"github.com/lyonbrown4d/nespa/routing"
 	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
+	"github.com/samber/oops"
 )
 
 var (
-	ErrNoRoute        = errors.New("client: no route")
-	ErrCatalogVersion = errors.New("client: catalog version not found")
+	ErrNoRoute        = oops.Code("no_route").In("client.routing").New("client: no route")
+	ErrCatalogVersion = oops.Code("catalog_version_not_found").In("client.routing").New("client: catalog version not found")
 )
 
 type RoutedConfig struct {
@@ -138,34 +139,65 @@ func sendWithRouteRetry[T any](
 	key cachewire.Key,
 	send func(routeDecision) (T, error),
 ) (T, error) {
-	response, err := sendWithCurrentRoute(ctx, client, key, send)
-	if err == nil || !isWireNoRoute(err) {
-		return response, err
-	}
-	if refreshErr := client.Refresh(ctx); refreshErr != nil {
-		var zero T
-		return zero, fmt.Errorf("refresh routed cache snapshot: %w", refreshErr)
-	}
-	return sendWithCurrentRoute(ctx, client, key, send)
-}
-
-func sendWithCurrentRoute[T any](
-	ctx context.Context,
-	client *RoutedTCPClient,
-	key cachewire.Key,
-	send func(routeDecision) (T, error),
-) (T, error) {
 	decision, err := client.resolve(ctx, key)
 	if err != nil {
 		var zero T
 		return zero, err
 	}
-	return send(decision)
+	response, err := send(decision)
+	if err == nil {
+		return response, nil
+	}
+	refresh, requireChange := shouldRefreshRoute(err)
+	if !refresh {
+		return response, err
+	}
+	if refreshErr := client.Refresh(ctx); refreshErr != nil {
+		var zero T
+		return zero, oops.Code("route_snapshot_refresh_failed").
+			In("client.routing").
+			Wrap(refreshErr)
+	}
+	next, err := client.resolve(ctx, key)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	if requireChange && sameRouteDecision(decision, next) {
+		return response, err
+	}
+	return send(next)
 }
 
-func isWireNoRoute(err error) bool {
+func shouldRefreshRoute(err error) (bool, bool) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false, false
+	}
 	var wireErr cachewire.Error
-	return errors.As(err, &wireErr) && wireErr.Code == protocol.ErrorNoRoute
+	if !errors.As(err, &wireErr) {
+		return true, true
+	}
+	switch wireErr.Code {
+	case protocol.ErrorNoRoute:
+		return true, false
+	case protocol.ErrorTimeout, protocol.ErrorUnavailable:
+		return true, true
+	case protocol.ErrorUnknown,
+		protocol.ErrorBadFrame,
+		protocol.ErrorUnsupportedVersion,
+		protocol.ErrorTooLarge,
+		protocol.ErrorInternal,
+		protocol.ErrorInvalidArgument:
+		return false, false
+	}
+	return false, false
+}
+
+func sameRouteDecision(left, right routeDecision) bool {
+	return left.addr == right.addr &&
+		left.routeEpoch == right.routeEpoch &&
+		left.namespaceVersion == right.namespaceVersion &&
+		left.spaceVersion == right.spaceVersion
 }
 
 func (c *RoutedTCPClient) resolve(ctx context.Context, key cachewire.Key) (routeDecision, error) {
@@ -197,15 +229,24 @@ func (c *RoutedTCPClient) currentSnapshot(ctx context.Context) (controlapi.Snaps
 func resolveSnapshot(snapshot controlapi.SnapshotBody, key cachewire.Key) (routeDecision, error) {
 	route, ok := routing.Select(snapshot.Routes, key.Namespace, key.Space, key.Key)
 	if !ok {
-		return routeDecision{}, fmt.Errorf("%w: %s/%s/%s", ErrNoRoute, key.Namespace, key.Space, key.Key)
+		return routeDecision{}, oops.Code("no_route").
+			In("client.routing").
+			With("namespace", key.Namespace, "space", key.Space, "key", key.Key).
+			Wrap(ErrNoRoute)
 	}
 	namespaceVersion, ok := routing.NamespaceVersion(snapshot.Namespaces, key.Namespace)
 	if !ok {
-		return routeDecision{}, fmt.Errorf("%w: namespace %s", ErrCatalogVersion, key.Namespace)
+		return routeDecision{}, oops.Code("catalog_version_not_found").
+			In("client.routing").
+			With("namespace", key.Namespace).
+			Wrap(ErrCatalogVersion)
 	}
 	spaceVersion, ok := routing.SpaceVersion(snapshot.Spaces, key.Namespace, key.Space)
 	if !ok {
-		return routeDecision{}, fmt.Errorf("%w: space %s/%s", ErrCatalogVersion, key.Namespace, key.Space)
+		return routeDecision{}, oops.Code("catalog_version_not_found").
+			In("client.routing").
+			With("namespace", key.Namespace, "space", key.Space).
+			Wrap(ErrCatalogVersion)
 	}
 	return routeDecision{
 		addr:             route.Addr,

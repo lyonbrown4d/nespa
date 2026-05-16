@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"sort"
 
 	"github.com/lyonbrown4d/nespa/controlapi"
@@ -43,7 +44,7 @@ func (s *ControlState) CreateNamespace(namespace string) (controlapi.CreateNames
 	}, nil
 }
 
-func (s *ControlState) CreateSpace(namespace, space string) (controlapi.CreateSpaceResponse, error) {
+func (s *ControlState) CreateSpace(ctx context.Context, namespace, space string) (controlapi.CreateSpaceResponse, error) {
 	namespace, space, err := normalizeSpaceIdentity(namespace, space)
 	if err != nil {
 		return controlapi.CreateSpaceResponse{}, err
@@ -67,6 +68,11 @@ func (s *ControlState) CreateSpace(namespace, space string) (controlapi.CreateSp
 			CreatedAtUnix: s.now().Unix(),
 		}
 		s.spaces.Set(ref, item)
+		s.recordRebalanceEventLocked(ctx, rebalanceEvent{
+			reason:    rebalanceReasonSpaceCreated,
+			namespace: namespace,
+			space:     space,
+		})
 	}
 
 	return controlapi.CreateSpaceResponse{

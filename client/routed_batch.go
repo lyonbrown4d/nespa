@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"sort"
 
+	collectionlist "github.com/arcgolabs/collectionx/list"
+	collectionmapping "github.com/arcgolabs/collectionx/mapping"
 	"github.com/lyonbrown4d/nespa/cachewire"
 	"github.com/lyonbrown4d/nespa/controlapi"
+	"github.com/samber/oops"
 )
 
 type indexedSetRequest struct {
@@ -21,24 +24,14 @@ type indexedGetRequest struct {
 
 type routedBatchGroup[T any] struct {
 	addr  string
-	items []T
+	items *collectionlist.List[T]
 }
 
 func (c *RoutedTCPClient) BatchSet(ctx context.Context, request cachewire.BatchSetRequest) (cachewire.BatchSetResponse, error) {
-	items := make([]indexedSetRequest, 0, len(request.Items))
-	for index := range request.Items {
-		items = append(items, indexedSetRequest{
-			index:   index,
-			request: request.Items[index],
-		})
-	}
-
 	records, err := routedBatch(ctx, c, len(request.Items),
-		items,
-		func(snapshot controlapi.SnapshotBody, items []indexedSetRequest) ([]routedBatchGroup[indexedSetRequest], error) {
-			return groupSetRequests(snapshot, items)
-		},
-		func(epoch uint64, addr string, group []indexedSetRequest) ([]cachewire.Record, error) {
+		indexSetRequests(request.Items),
+		groupSetRequests,
+		func(epoch uint64, addr string, group *collectionlist.List[indexedSetRequest]) ([]cachewire.Record, error) {
 			response, sendErr := c.transport.BatchSet(ctx, addr, cachewire.BatchSetRequest{
 				RouteEpoch: epoch,
 				Items:      setItems(group),
@@ -57,20 +50,10 @@ func (c *RoutedTCPClient) BatchSet(ctx context.Context, request cachewire.BatchS
 }
 
 func (c *RoutedTCPClient) BatchGet(ctx context.Context, request cachewire.BatchGetRequest) (cachewire.BatchGetResponse, error) {
-	items := make([]indexedGetRequest, 0, len(request.Items))
-	for index := range request.Items {
-		items = append(items, indexedGetRequest{
-			index:   index,
-			request: request.Items[index],
-		})
-	}
-
 	records, err := routedBatch(ctx, c, len(request.Items),
-		items,
-		func(snapshot controlapi.SnapshotBody, items []indexedGetRequest) ([]routedBatchGroup[indexedGetRequest], error) {
-			return groupGetRequests(snapshot, items)
-		},
-		func(epoch uint64, addr string, group []indexedGetRequest) ([]cachewire.Record, error) {
+		indexGetRequests(request.Items),
+		groupGetRequests,
+		func(epoch uint64, addr string, group *collectionlist.List[indexedGetRequest]) ([]cachewire.Record, error) {
 			response, sendErr := c.transport.BatchGet(ctx, addr, cachewire.BatchGetRequest{
 				RouteEpoch: epoch,
 				Items:      getItems(group),
@@ -88,28 +71,58 @@ func (c *RoutedTCPClient) BatchGet(ctx context.Context, request cachewire.BatchG
 	return cachewire.BatchGetResponse{Records: records}, nil
 }
 
+func indexSetRequests(items []cachewire.SetRequest) *collectionlist.List[indexedSetRequest] {
+	indexed := collectionlist.NewListWithCapacity[indexedSetRequest](len(items))
+	for index := range items {
+		indexed.Add(indexedSetRequest{
+			index:   index,
+			request: items[index],
+		})
+	}
+	return indexed
+}
+
+func indexGetRequests(items []cachewire.GetRequest) *collectionlist.List[indexedGetRequest] {
+	indexed := collectionlist.NewListWithCapacity[indexedGetRequest](len(items))
+	for index := range items {
+		indexed.Add(indexedGetRequest{
+			index:   index,
+			request: items[index],
+		})
+	}
+	return indexed
+}
+
 func routedBatch[T any](
 	ctx context.Context,
 	client *RoutedTCPClient,
 	count int,
-	items []T,
-	group func(controlapi.SnapshotBody, []T) ([]routedBatchGroup[T], error),
-	send func(uint64, string, []T) ([]cachewire.Record, error),
-	copyRecords func([]cachewire.Record, []T, []cachewire.Record),
+	items *collectionlist.List[T],
+	group func(controlapi.SnapshotBody, *collectionlist.List[T]) (*collectionlist.List[routedBatchGroup[T]], error),
+	send func(uint64, string, *collectionlist.List[T]) ([]cachewire.Record, error),
+	copyRecords func([]cachewire.Record, *collectionlist.List[T], []cachewire.Record),
 ) ([]cachewire.Record, error) {
 	if count == 0 {
 		return nil, nil
 	}
 	records, remaining, err := runRoutedBatchWithCurrentSnapshot(ctx, client, count, items, group, send, copyRecords)
-	if err == nil || !isWireNoRoute(err) {
+	if err == nil {
+		return records, nil
+	}
+	refresh, _ := shouldRefreshRoute(err)
+	if !refresh {
 		return records, err
 	}
 	if refreshErr := client.Refresh(ctx); refreshErr != nil {
-		return nil, fmt.Errorf("refresh routed cache snapshot: %w", refreshErr)
+		return nil, oops.Code("route_snapshot_refresh_failed").
+			In("client.routing").
+			Wrap(refreshErr)
 	}
 	snapshot, snapshotErr := client.currentSnapshot(ctx)
 	if snapshotErr != nil {
-		return nil, fmt.Errorf("routed cache snapshot: %w", snapshotErr)
+		return nil, oops.Code("route_snapshot_read_failed").
+			In("client.routing").
+			Wrap(snapshotErr)
 	}
 	retryItems := flattenBatchGroups(remaining)
 	groups, err := group(snapshot, retryItems)
@@ -124,11 +137,11 @@ func runRoutedBatchWithCurrentSnapshot[T any](
 	ctx context.Context,
 	client *RoutedTCPClient,
 	count int,
-	items []T,
-	group func(controlapi.SnapshotBody, []T) ([]routedBatchGroup[T], error),
-	send func(uint64, string, []T) ([]cachewire.Record, error),
-	copyRecords func([]cachewire.Record, []T, []cachewire.Record),
-) ([]cachewire.Record, []routedBatchGroup[T], error) {
+	items *collectionlist.List[T],
+	group func(controlapi.SnapshotBody, *collectionlist.List[T]) (*collectionlist.List[routedBatchGroup[T]], error),
+	send func(uint64, string, *collectionlist.List[T]) ([]cachewire.Record, error),
+	copyRecords func([]cachewire.Record, *collectionlist.List[T], []cachewire.Record),
+) ([]cachewire.Record, *collectionlist.List[routedBatchGroup[T]], error) {
 	snapshot, err := client.currentSnapshot(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -144,107 +157,133 @@ func runRoutedBatchWithCurrentSnapshot[T any](
 func runRoutedBatch[T any](
 	count int,
 	epoch uint64,
-	groups []routedBatchGroup[T],
+	groups *collectionlist.List[routedBatchGroup[T]],
 	records []cachewire.Record,
-	send func(uint64, string, []T) ([]cachewire.Record, error),
-	copyRecords func([]cachewire.Record, []T, []cachewire.Record),
-) ([]cachewire.Record, []routedBatchGroup[T], error) {
+	send func(uint64, string, *collectionlist.List[T]) ([]cachewire.Record, error),
+	copyRecords func([]cachewire.Record, *collectionlist.List[T], []cachewire.Record),
+) ([]cachewire.Record, *collectionlist.List[routedBatchGroup[T]], error) {
 	if len(records) != count {
 		records = make([]cachewire.Record, count)
 	}
 
-	for index := range groups {
-		group := groups[index]
+	var remaining *collectionlist.List[routedBatchGroup[T]]
+	var runErr error
+	groups.Range(func(index int, group routedBatchGroup[T]) bool {
 		response, err := send(epoch, group.addr, group.items)
 		if err != nil {
-			return records, groups[index:], err
+			remaining = groups.Drop(index)
+			runErr = err
+			return false
 		}
 		copyRecords(records, group.items, response)
-	}
-	return records, nil, nil
+		return true
+	})
+	return records, remaining, runErr
 }
 
-func groupSetRequests(snapshot controlapi.SnapshotBody, items []indexedSetRequest) ([]routedBatchGroup[indexedSetRequest], error) {
-	groups := make(map[string][]indexedSetRequest)
-	for index := range items {
-		item := items[index]
+func groupSetRequests(snapshot controlapi.SnapshotBody, items *collectionlist.List[indexedSetRequest]) (*collectionlist.List[routedBatchGroup[indexedSetRequest]], error) {
+	groups := collectionmapping.NewMap[string, *collectionlist.List[indexedSetRequest]]()
+	var groupErr error
+	items.Range(func(_ int, item indexedSetRequest) bool {
 		decision, err := resolveSnapshot(snapshot, item.request.Key)
 		if err != nil {
-			return nil, err
+			groupErr = err
+			return false
 		}
 		stampSetRequest(&item.request, decision)
-		groups[decision.addr] = append(groups[decision.addr], item)
+		addBatchGroup(groups, decision.addr, item)
+		return true
+	})
+	if groupErr != nil {
+		return nil, groupErr
 	}
 	return orderedBatchGroups(groups), nil
 }
 
-func groupGetRequests(snapshot controlapi.SnapshotBody, items []indexedGetRequest) ([]routedBatchGroup[indexedGetRequest], error) {
-	groups := make(map[string][]indexedGetRequest)
-	for index := range items {
-		item := items[index]
+func groupGetRequests(snapshot controlapi.SnapshotBody, items *collectionlist.List[indexedGetRequest]) (*collectionlist.List[routedBatchGroup[indexedGetRequest]], error) {
+	groups := collectionmapping.NewMap[string, *collectionlist.List[indexedGetRequest]]()
+	var groupErr error
+	items.Range(func(_ int, item indexedGetRequest) bool {
 		decision, err := resolveSnapshot(snapshot, item.request.Key)
 		if err != nil {
-			return nil, err
+			groupErr = err
+			return false
 		}
 		stampGetRequest(&item.request, decision)
-		groups[decision.addr] = append(groups[decision.addr], item)
+		addBatchGroup(groups, decision.addr, item)
+		return true
+	})
+	if groupErr != nil {
+		return nil, groupErr
 	}
 	return orderedBatchGroups(groups), nil
 }
 
-func orderedBatchGroups[T any](groups map[string][]T) []routedBatchGroup[T] {
-	addrs := make([]string, 0, len(groups))
-	for addr := range groups {
-		addrs = append(addrs, addr)
+func addBatchGroup[T any](groups *collectionmapping.Map[string, *collectionlist.List[T]], addr string, item T) {
+	items, ok := groups.Get(addr)
+	if !ok {
+		items = collectionlist.NewList[T]()
+		groups.Set(addr, items)
 	}
+	items.Add(item)
+}
+
+func orderedBatchGroups[T any](groups *collectionmapping.Map[string, *collectionlist.List[T]]) *collectionlist.List[routedBatchGroup[T]] {
+	addrs := groups.Keys()
 	sort.Strings(addrs)
 
-	out := make([]routedBatchGroup[T], 0, len(addrs))
+	out := collectionlist.NewListWithCapacity[routedBatchGroup[T]](len(addrs))
 	for _, addr := range addrs {
-		out = append(out, routedBatchGroup[T]{
+		items, _ := groups.Get(addr)
+		out.Add(routedBatchGroup[T]{
 			addr:  addr,
-			items: groups[addr],
+			items: items,
 		})
 	}
 	return out
 }
 
-func flattenBatchGroups[T any](groups []routedBatchGroup[T]) []T {
-	var items []T
-	for index := range groups {
-		items = append(items, groups[index].items...)
-	}
+func flattenBatchGroups[T any](groups *collectionlist.List[routedBatchGroup[T]]) *collectionlist.List[T] {
+	items := collectionlist.NewList[T]()
+	groups.Range(func(_ int, group routedBatchGroup[T]) bool {
+		items.Merge(group.items)
+		return true
+	})
 	return items
 }
 
-func setItems(group []indexedSetRequest) []cachewire.SetRequest {
-	items := make([]cachewire.SetRequest, 0, len(group))
-	for index := range group {
-		items = append(items, group[index].request)
-	}
-	return items
+func setItems(group *collectionlist.List[indexedSetRequest]) []cachewire.SetRequest {
+	items := collectionlist.NewListWithCapacity[cachewire.SetRequest](group.Len())
+	group.Range(func(_ int, item indexedSetRequest) bool {
+		items.Add(item.request)
+		return true
+	})
+	return items.Values()
 }
 
-func getItems(group []indexedGetRequest) []cachewire.GetRequest {
-	items := make([]cachewire.GetRequest, 0, len(group))
-	for index := range group {
-		items = append(items, group[index].request)
-	}
-	return items
+func getItems(group *collectionlist.List[indexedGetRequest]) []cachewire.GetRequest {
+	items := collectionlist.NewListWithCapacity[cachewire.GetRequest](group.Len())
+	group.Range(func(_ int, item indexedGetRequest) bool {
+		items.Add(item.request)
+		return true
+	})
+	return items.Values()
 }
 
-func copySetRecords(records []cachewire.Record, group []indexedSetRequest, response []cachewire.Record) {
+func copySetRecords(records []cachewire.Record, group *collectionlist.List[indexedSetRequest], response []cachewire.Record) {
 	for index := range response {
-		if index < len(group) {
-			records[group[index].index] = response[index]
+		item, ok := group.Get(index)
+		if ok {
+			records[item.index] = response[index]
 		}
 	}
 }
 
-func copyGetRecords(records []cachewire.Record, group []indexedGetRequest, response []cachewire.Record) {
+func copyGetRecords(records []cachewire.Record, group *collectionlist.List[indexedGetRequest], response []cachewire.Record) {
 	for index := range response {
-		if index < len(group) {
-			records[group[index].index] = response[index]
+		item, ok := group.Get(index)
+		if ok {
+			records[item.index] = response[index]
 		}
 	}
 }

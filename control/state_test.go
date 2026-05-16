@@ -1,10 +1,12 @@
 package control_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/arcgolabs/eventx"
 	"github.com/lyonbrown4d/nespa/control"
 	"github.com/lyonbrown4d/nespa/controlapi"
 )
@@ -19,7 +21,7 @@ func TestControlStateRegisterNodeBuildsSnapshotRoute(t *testing.T) {
 
 func TestControlStateHeartbeatRegistersUnknownNode(t *testing.T) {
 	state := control.NewControlState("test")
-	heartbeat, err := state.Heartbeat("node-2", "127.0.0.1:7503")
+	heartbeat, err := state.Heartbeat(t.Context(), "node-2", "127.0.0.1:7503")
 	if err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
@@ -51,7 +53,7 @@ func TestControlStateHeartbeatDoesNotAdvanceRevisionForLivePing(t *testing.T) {
 	registerNode(t, state)
 
 	now = time.Unix(20, 0)
-	heartbeat, err := state.Heartbeat("node-1", "127.0.0.1:7403")
+	heartbeat, err := state.Heartbeat(t.Context(), "node-1", "127.0.0.1:7403")
 	if err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
@@ -72,7 +74,7 @@ func TestControlStateAdvanceLivenessTransitionsNodeState(t *testing.T) {
 	state := control.NewControlStateWithClock("test", func() time.Time { return time.Unix(10, 0) })
 	registerNode(t, state)
 
-	suspect := state.AdvanceLiveness(time.Unix(16, 0), 5*time.Second, 10*time.Second)
+	suspect := state.AdvanceLiveness(t.Context(), time.Unix(16, 0), 5*time.Second, 10*time.Second)
 	if suspect.Revision != 2 {
 		t.Fatalf("suspect revision = %d, want 2", suspect.Revision)
 	}
@@ -83,7 +85,7 @@ func TestControlStateAdvanceLivenessTransitionsNodeState(t *testing.T) {
 		t.Fatalf("suspect node routes len = %d, want 0", len(routes))
 	}
 
-	dead := state.AdvanceLiveness(time.Unix(21, 0), 5*time.Second, 10*time.Second)
+	dead := state.AdvanceLiveness(t.Context(), time.Unix(21, 0), 5*time.Second, 10*time.Second)
 	if dead.Revision != 3 {
 		t.Fatalf("dead revision = %d, want 3", dead.Revision)
 	}
@@ -91,7 +93,7 @@ func TestControlStateAdvanceLivenessTransitionsNodeState(t *testing.T) {
 		t.Fatalf("unexpected dead changes: %+v", dead.Changed)
 	}
 
-	again := state.AdvanceLiveness(time.Unix(30, 0), 5*time.Second, 10*time.Second)
+	again := state.AdvanceLiveness(t.Context(), time.Unix(30, 0), 5*time.Second, 10*time.Second)
 	if again.Revision != 3 {
 		t.Fatalf("unchanged revision = %d, want 3", again.Revision)
 	}
@@ -100,14 +102,69 @@ func TestControlStateAdvanceLivenessTransitionsNodeState(t *testing.T) {
 	}
 }
 
+func TestControlStateRecordsRebalanceEvents(t *testing.T) {
+	now := time.Unix(10, 0)
+	state := control.NewControlStateWithClock("test", func() time.Time { return now })
+
+	registerNode(t, state)
+	events := state.RebalanceEvents()
+	if events.Revision != 1 || len(events.Events) != 1 {
+		t.Fatalf("registration events = %+v", events)
+	}
+	if events.Events[0].Reason != "node_registered" || events.Events[0].RouteCount != 1 {
+		t.Fatalf("registration event = %+v", events.Events[0])
+	}
+
+	now = time.Unix(16, 0)
+	state.AdvanceLiveness(t.Context(), now, 5*time.Second, 10*time.Second)
+	events = state.RebalanceEvents()
+	if events.Revision != 2 || len(events.Events) != 2 {
+		t.Fatalf("suspect events = %+v", events)
+	}
+	last := events.Events[len(events.Events)-1]
+	if last.Reason != "node_suspect" || last.State != "suspect" || last.RouteCount != 0 {
+		t.Fatalf("suspect event = %+v", last)
+	}
+}
+
+func TestControlStatePublishesRebalanceEvents(t *testing.T) {
+	bus := eventx.New()
+	defer func() {
+		if err := bus.Close(); err != nil {
+			t.Errorf("close bus: %v", err)
+		}
+	}()
+
+	received := make(chan control.RebalanceEvent, 1)
+	if _, err := eventx.Subscribe[control.RebalanceEvent](bus, func(_ context.Context, event control.RebalanceEvent) error {
+		received <- event
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe rebalance event: %v", err)
+	}
+
+	now := time.Unix(10, 0)
+	state := control.NewControlStateWithClockAndEvents("test", func() time.Time { return now }, bus)
+	registerNode(t, state)
+
+	select {
+	case event := <-received:
+		if event.Event.Reason != "node_registered" {
+			t.Fatalf("event reason = %q, want node_registered", event.Event.Reason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for rebalance event")
+	}
+}
+
 func TestControlStateHeartbeatRecoversSuspectNode(t *testing.T) {
 	now := time.Unix(10, 0)
 	state := control.NewControlStateWithClock("test", func() time.Time { return now })
 	registerNode(t, state)
-	state.AdvanceLiveness(time.Unix(16, 0), 5*time.Second, 10*time.Second)
+	state.AdvanceLiveness(t.Context(), time.Unix(16, 0), 5*time.Second, 10*time.Second)
 
 	now = time.Unix(17, 0)
-	heartbeat, err := state.Heartbeat("node-1", "127.0.0.1:7403")
+	heartbeat, err := state.Heartbeat(t.Context(), "node-1", "127.0.0.1:7403")
 	if err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
@@ -138,7 +195,7 @@ func TestControlStateRejectsInvalidNodeIdentity(t *testing.T) {
 		{name: "nul node id", nodeID: "node\x00-1", addr: "127.0.0.1:7403"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := state.RegisterNode(test.nodeID, test.addr)
+			_, err := state.RegisterNode(t.Context(), test.nodeID, test.addr)
 			if !errors.Is(err, control.ErrInvalidNode) {
 				t.Fatalf("err = %v, want ErrInvalidNode", err)
 			}
@@ -156,7 +213,7 @@ func registerNode(t *testing.T, state *control.ControlState) uint64 {
 
 func registerSpecificNode(t *testing.T, state *control.ControlState, nodeID, addr string) uint64 {
 	t.Helper()
-	response, err := state.RegisterNode(nodeID, addr)
+	response, err := state.RegisterNode(t.Context(), nodeID, addr)
 	if err != nil {
 		t.Fatalf("register node: %v", err)
 	}

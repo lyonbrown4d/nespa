@@ -1,13 +1,13 @@
 package engine
 
 import (
-	"fmt"
-	"maps"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	collectionlist "github.com/arcgolabs/collectionx/list"
+	"github.com/samber/oops"
 )
 
 func (s *shardWorker) run(done <-chan struct{}) {
@@ -40,13 +40,14 @@ func (s *shardWorker) apply(cmd shardCommand) shardResult {
 	case commandEvict:
 		return shardResult{evicted: s.evict(cmd.evict)}
 	default:
-		return shardResult{err: fmt.Errorf("engine: unknown shard command %d", cmd.kind)}
+		return shardResult{err: oops.Code("unknown_shard_command").
+			In("cache.engine").
+			With("kind", cmd.kind).
+			Errorf("engine: unknown shard command %d", cmd.kind)}
 	}
 }
 
 func (s *shardWorker) statsResult() shardResult {
-	spaces := make(map[spaceKey]spaceUsage, len(s.spaces))
-	maps.Copy(spaces, s.spaces)
 	return shardResult{stats: ShardStats{
 		ID:            s.id,
 		Objects:       s.objects,
@@ -60,12 +61,12 @@ func (s *shardWorker) statsResult() shardResult {
 		TouchHits:     s.touchHits,
 		TouchMisses:   s.touchMisses,
 		QueueDepth:    len(s.commands),
-	}, spaces: spaces}
+	}, spaces: s.spaces.Clone()}
 }
 
 func (s *shardWorker) applySet(cmd shardCommand) shardResult {
 	if cmd.setOpts.ExpectedVersion > 0 {
-		if existing, ok := s.entries[cmd.physical]; ok {
+		if existing, ok := s.entries.Get(cmd.physical); ok {
 			if existing.version != cmd.setOpts.ExpectedVersion {
 				return shardResult{found: false}
 			}
@@ -80,13 +81,13 @@ func (s *shardWorker) applySet(cmd shardCommand) shardResult {
 	}
 
 	cost := costOf(cmd.key, cmd.value)
-	if existing, ok := s.entries[cmd.physical]; ok {
+	if existing, ok := s.entries.Get(cmd.physical); ok {
 		s.replaceEntry(existing, cmd, expireAt, cost)
 		return shardResult{record: existing.record(), found: true}
 	}
 
 	ent := newEntry(cmd, expireAt, cost)
-	s.entries[cmd.physical] = ent
+	s.entries.Set(cmd.physical, ent)
 	s.objects++
 	s.memoryBytes += cost
 	s.addSpaceUsage(spaceKeyOf(cmd.key), 1, cost)
@@ -116,7 +117,7 @@ func (s *shardWorker) replaceEntry(existing *entry, cmd shardCommand, expireAt t
 
 func (s *shardWorker) applyGet(cmd shardCommand) shardResult {
 	s.gets++
-	ent, ok := s.entries[cmd.physical]
+	ent, ok := s.entries.Get(cmd.physical)
 	if !ok {
 		s.getMisses++
 		return shardResult{}
@@ -138,7 +139,7 @@ func (s *shardWorker) applyGet(cmd shardCommand) shardResult {
 }
 
 func (s *shardWorker) applyDelete(cmd shardCommand) shardResult {
-	ent, ok := s.entries[cmd.physical]
+	ent, ok := s.entries.Get(cmd.physical)
 	if !ok {
 		return shardResult{}
 	}
@@ -151,7 +152,7 @@ func (s *shardWorker) applyDelete(cmd shardCommand) shardResult {
 
 func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
 	s.touches++
-	ent, ok := s.entries[cmd.physical]
+	ent, ok := s.entries.Get(cmd.physical)
 	if !ok {
 		s.touchMisses++
 		return shardResult{}
@@ -187,7 +188,7 @@ func (s *shardWorker) applyTouch(cmd shardCommand) shardResult {
 }
 
 func (s *shardWorker) applyAdjust(cmd shardCommand) shardResult {
-	existing, exists := s.entries[cmd.physical]
+	existing, exists := s.entries.Get(cmd.physical)
 	if exists && cmd.adjust.ExpectedVersion > 0 && existing.version != cmd.adjust.ExpectedVersion {
 		return shardResult{found: false}
 	}
@@ -263,7 +264,7 @@ func (s *shardWorker) applyAdjust(cmd shardCommand) shardResult {
 		accessCount:      1,
 		costBytes:        cost,
 	}
-	s.entries[cmd.physical] = ent
+	s.entries.Set(cmd.physical, ent)
 	s.objects++
 	s.memoryBytes += cost
 	s.addSpaceUsage(spaceKeyOf(cmd.key), 1, cost)
@@ -274,17 +275,26 @@ func addToCurrentCounter(raw []byte, delta int64) (int64, error) {
 	text := strings.TrimSpace(string(raw))
 	current, err := strconv.ParseInt(text, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("%w: parse int64 value: %w", ErrInvalidCounter, err)
+		return 0, oops.Code("invalid_counter_value").
+			In("cache.engine").
+			With("value", text, "parse_error", err.Error()).
+			Wrap(ErrInvalidCounter)
 	}
 	return safeAdd(current, delta)
 }
 
 func safeAdd(base, delta int64) (int64, error) {
 	if delta > 0 && base > math.MaxInt64-delta {
-		return 0, fmt.Errorf("%w: overflow %d + %d", ErrInvalidCounter, base, delta)
+		return 0, oops.Code("counter_overflow").
+			In("cache.engine").
+			With("base", base, "delta", delta).
+			Wrap(ErrInvalidCounter)
 	}
 	if delta < 0 && base < math.MinInt64-delta {
-		return 0, fmt.Errorf("%w: overflow %d + %d", ErrInvalidCounter, base, delta)
+		return 0, oops.Code("counter_overflow").
+			In("cache.engine").
+			With("base", base, "delta", delta).
+			Wrap(ErrInvalidCounter)
 	}
 	return base + delta, nil
 }
@@ -292,47 +302,74 @@ func safeAdd(base, delta int64) (int64, error) {
 func (s *shardWorker) evict(opts EvictOptions) EvictResult {
 	result := EvictResult{RequestedBytes: opts.TargetBytes}
 	candidates := s.collectEvictionCandidates(opts, &result)
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].lastAccessAt.Equal(candidates[j].lastAccessAt) {
-			return candidates[i].createdAt.Before(candidates[j].createdAt)
+	candidates.Sort(func(left, right *entry) int {
+		if left.lastAccessAt.Equal(right.lastAccessAt) {
+			return compareTime(left.createdAt, right.createdAt)
 		}
-		return candidates[i].lastAccessAt.Before(candidates[j].lastAccessAt)
+		return compareTime(left.lastAccessAt, right.lastAccessAt)
 	})
 	s.evictCandidates(candidates, opts.TargetBytes, &result)
 	return result
 }
 
-func (s *shardWorker) collectEvictionCandidates(opts EvictOptions, result *EvictResult) []*entry {
-	candidates := make([]*entry, 0)
+func (s *shardWorker) collectEvictionCandidates(opts EvictOptions, result *EvictResult) *collectionlist.List[*entry] {
+	candidates := collectionlist.NewList[*entry]()
+	expired := collectionlist.NewList[struct {
+		physical string
+		ent      *entry
+	}]()
 	excludePhysical := ""
 	if opts.ExcludeActive {
 		excludePhysical = physicalKey(opts.Exclude)
 	}
 
-	for physical, ent := range s.entries {
+	s.entries.Range(func(physical string, ent *entry) bool {
 		if !evictionCandidate(ent, opts, physical, excludePhysical) {
-			continue
+			return true
 		}
 		if ent.expired(opts.Now) {
 			result.FreedBytes += ent.costBytes
 			result.EvictedObjects++
-			s.deleteEntry(physical, ent)
-			continue
+			expired.Add(struct {
+				physical string
+				ent      *entry
+			}{physical: physical, ent: ent})
+			return true
 		}
-		candidates = append(candidates, ent)
-	}
+		candidates.Add(ent)
+		return true
+	})
+	expired.Range(func(_ int, item struct {
+		physical string
+		ent      *entry
+	}) bool {
+		s.deleteEntry(item.physical, item.ent)
+		return true
+	})
 	return candidates
 }
 
-func (s *shardWorker) evictCandidates(candidates []*entry, target uint64, result *EvictResult) {
-	for _, ent := range candidates {
+func compareTime(left, right time.Time) int {
+	switch {
+	case left.Before(right):
+		return -1
+	case right.Before(left):
+		return 1
+	default:
+		return 0
+	}
+}
+
+func (s *shardWorker) evictCandidates(candidates *collectionlist.List[*entry], target uint64, result *EvictResult) {
+	candidates.Range(func(_ int, ent *entry) bool {
 		if result.FreedBytes >= target {
-			break
+			return false
 		}
 		result.FreedBytes += ent.costBytes
 		result.EvictedObjects++
 		s.deleteEntry(physicalKey(ent.key), ent)
-	}
+		return true
+	})
 	if result.EvictedObjects > 0 {
 		s.evictions += result.EvictedObjects
 	}
@@ -346,37 +383,57 @@ func evictionCandidate(ent *entry, opts EvictOptions, physical, excludePhysical 
 }
 
 func (s *shardWorker) sweepExpired(now time.Time) uint64 {
-	var deleted uint64
-	for physical, ent := range s.entries {
+	expired := collectionlist.NewList[struct {
+		physical string
+		ent      *entry
+	}]()
+	s.entries.Range(func(physical string, ent *entry) bool {
 		if ent.expired(now) {
-			s.deleteEntry(physical, ent)
-			deleted++
+			expired.Add(struct {
+				physical string
+				ent      *entry
+			}{physical: physical, ent: ent})
 		}
+		return true
+	})
+	expired.Range(func(_ int, item struct {
+		physical string
+		ent      *entry
+	}) bool {
+		s.deleteEntry(item.physical, item.ent)
+		return true
+	})
+	return checkedUint64(expired.Len())
+}
+
+func checkedUint64(value int) uint64 {
+	if value < 0 {
+		return 0
 	}
-	return deleted
+	return uint64(value)
 }
 
 func (s *shardWorker) deleteEntry(physical string, ent *entry) {
-	delete(s.entries, physical)
+	s.entries.Delete(physical)
 	s.objects--
 	s.memoryBytes -= ent.costBytes
 	s.subtractSpaceUsage(spaceKeyOf(ent.key), 1, ent.costBytes)
 }
 
 func (s *shardWorker) addSpaceUsage(key spaceKey, objects, memoryBytes uint64) {
-	usage := s.spaces[key]
+	usage, _ := s.spaces.Get(key)
 	usage.objects += objects
 	usage.memoryBytes += memoryBytes
-	s.spaces[key] = usage
+	s.spaces.Set(key, usage)
 }
 
 func (s *shardWorker) subtractSpaceUsage(key spaceKey, objects, memoryBytes uint64) {
-	usage := s.spaces[key]
+	usage, _ := s.spaces.Get(key)
 	usage.objects -= objects
 	usage.memoryBytes -= memoryBytes
 	if usage.objects == 0 && usage.memoryBytes == 0 {
-		delete(s.spaces, key)
+		s.spaces.Delete(key)
 		return
 	}
-	s.spaces[key] = usage
+	s.spaces.Set(key, usage)
 }

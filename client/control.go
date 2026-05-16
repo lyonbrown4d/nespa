@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lyonbrown4d/nespa/controlapi"
+	"github.com/samber/oops"
 )
 
 type controlSnapshotClient struct {
@@ -20,7 +21,10 @@ type controlSnapshotClient struct {
 func newControlSnapshotClient(addr string) (*controlSnapshotClient, error) {
 	baseURL := normalizeControlBaseURL(addr)
 	if baseURL == "" {
-		return nil, ErrInvalidConfig
+		return nil, oops.Code("invalid_config").
+			In("client").
+			With("control_addr", addr).
+			Wrap(ErrInvalidConfig)
 	}
 	return &controlSnapshotClient{
 		baseURL: baseURL,

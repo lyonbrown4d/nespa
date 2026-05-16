@@ -3,9 +3,10 @@ package protocol
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
+
+	"github.com/samber/oops"
 )
 
 const (
@@ -18,10 +19,10 @@ const (
 )
 
 var (
-	ErrInvalidMagic       = errors.New("protocol: invalid frame magic")
-	ErrUnsupportedVersion = errors.New("protocol: unsupported frame version")
-	ErrFrameTooLarge      = errors.New("protocol: frame too large")
-	ErrInvalidFrame       = errors.New("protocol: invalid frame")
+	ErrInvalidMagic       = oops.Code("invalid_frame_magic").In("protocol.frame").New("protocol: invalid frame magic")
+	ErrUnsupportedVersion = oops.Code("unsupported_frame_version").In("protocol.frame").New("protocol: unsupported frame version")
+	ErrFrameTooLarge      = oops.Code("frame_too_large").In("protocol.frame").New("protocol: frame too large")
+	ErrInvalidFrame       = oops.Code("invalid_frame").In("protocol.frame").New("protocol: invalid frame")
 )
 
 type ErrorCode uint16
@@ -154,7 +155,7 @@ func (c *Codec) Decode(r io.Reader) (Frame, error) {
 	}
 
 	if magic := binary.BigEndian.Uint32(header[0:4]); magic != Magic {
-		return Frame{}, ErrInvalidMagic
+		return Frame{}, fmt.Errorf("decode frame magic: %w", ErrInvalidMagic)
 	}
 	if version := header[4]; version != Version {
 		return Frame{}, fmt.Errorf("%w: %d", ErrUnsupportedVersion, version)

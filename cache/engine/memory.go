@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"hash/fnv"
 	"sort"
 	"time"
+
+	collectionmapping "github.com/arcgolabs/collectionx/mapping"
+	"github.com/samber/oops"
 )
 
 func NewMemory(cfg Config) *MemoryEngine {
@@ -32,8 +34,8 @@ func NewMemory(cfg Config) *MemoryEngine {
 		worker := &shardWorker{
 			id:       i,
 			commands: make(chan shardCommand, queueSize),
-			entries:  make(map[string]*entry),
-			spaces:   make(map[spaceKey]spaceUsage),
+			entries:  collectionmapping.NewMap[string, *entry](),
+			spaces:   collectionmapping.NewMap[spaceKey, spaceUsage](),
 		}
 		eng.shards[i] = worker
 		eng.wg.Go(func() {
@@ -143,7 +145,7 @@ func (e *MemoryEngine) Adjust(ctx context.Context, key Key, opts AdjustOptions) 
 
 func (e *MemoryEngine) Stats(ctx context.Context) (Stats, error) {
 	stats := Stats{Shards: make([]ShardStats, len(e.shards))}
-	spaces := make(map[spaceKey]spaceUsage)
+	spaces := collectionmapping.NewMap[spaceKey, spaceUsage]()
 	for i, worker := range e.shards {
 		result, err := e.executeOn(ctx, worker, shardCommand{kind: commandStats, reply: make(chan shardResult, 1)})
 		if err != nil {
@@ -240,7 +242,9 @@ func (e *MemoryEngine) executeOn(ctx context.Context, worker *shardWorker, cmd s
 	select {
 	case worker.commands <- cmd:
 	case <-ctx.Done():
-		return shardResult{}, fmt.Errorf("send shard command: %w", ctx.Err())
+		return shardResult{}, oops.Code("shard_command_send_failed").
+			In("cache.engine").
+			Wrap(ctx.Err())
 	case <-e.done:
 		return shardResult{}, ErrClosed
 	}
@@ -249,7 +253,9 @@ func (e *MemoryEngine) executeOn(ctx context.Context, worker *shardWorker, cmd s
 	case result := <-cmd.reply:
 		return result, nil
 	case <-ctx.Done():
-		return shardResult{}, fmt.Errorf("wait shard command: %w", ctx.Err())
+		return shardResult{}, oops.Code("shard_command_wait_failed").
+			In("cache.engine").
+			Wrap(ctx.Err())
 	case <-e.done:
 		return shardResult{}, ErrClosed
 	}
@@ -282,25 +288,27 @@ func addShardStats(stats *Stats, shard ShardStats) {
 	stats.TouchMisses += shard.TouchMisses
 }
 
-func addSpaceStats(total, shard map[spaceKey]spaceUsage) {
-	for key, usage := range shard {
-		next := total[key]
+func addSpaceStats(total, shard *collectionmapping.Map[spaceKey, spaceUsage]) {
+	shard.Range(func(key spaceKey, usage spaceUsage) bool {
+		next, _ := total.Get(key)
 		next.objects += usage.objects
 		next.memoryBytes += usage.memoryBytes
-		total[key] = next
-	}
+		total.Set(key, next)
+		return true
+	})
 }
 
-func buildSpaceStats(spaces map[spaceKey]spaceUsage) []SpaceStats {
-	out := make([]SpaceStats, 0, len(spaces))
-	for key, usage := range spaces {
+func buildSpaceStats(spaces *collectionmapping.Map[spaceKey, spaceUsage]) []SpaceStats {
+	out := make([]SpaceStats, 0, spaces.Len())
+	spaces.Range(func(key spaceKey, usage spaceUsage) bool {
 		out = append(out, SpaceStats{
 			Namespace:   key.namespace,
 			Space:       key.space,
 			Objects:     usage.objects,
 			MemoryBytes: usage.memoryBytes,
 		})
-	}
+		return true
+	})
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Namespace == out[j].Namespace {
 			return out[i].Space < out[j].Space

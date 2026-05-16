@@ -3,12 +3,12 @@ package cache
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/lyonbrown4d/nespa/cache/engine"
+	"github.com/samber/oops"
 )
 
 type Key = engine.Key
@@ -18,7 +18,7 @@ type ShardStats = engine.ShardStats
 type SpaceStats = engine.SpaceStats
 type EvictResult = engine.EvictResult
 
-var ErrQuotaExceeded = errors.New("cache: quota exceeded")
+var ErrQuotaExceeded = oops.Code("quota_exceeded").In("cache").New("cache: quota exceeded")
 
 type QuotaConfig struct {
 	DefaultNamespaceMemoryBytes uint64

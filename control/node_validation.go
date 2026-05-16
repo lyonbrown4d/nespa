@@ -1,14 +1,15 @@
 package control
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/samber/oops"
 )
 
-var ErrInvalidNode = errors.New("control: invalid node")
+var ErrInvalidNode = oops.Code("invalid_node").In("control.node").New("control: invalid node")
 
 func validateNodeIdentity(nodeID, addr string) (string, string, error) {
 	nodeID, err := normalizeNodeID(nodeID)

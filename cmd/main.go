@@ -14,6 +14,7 @@ import (
 	collectionlist "github.com/arcgolabs/collectionx/list"
 	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/logx"
+	"github.com/samber/oops"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -182,23 +183,23 @@ func bannerModule(stdout io.Writer) dix.Module {
 }
 
 func endpoints(cfg serverConfig) *collectionlist.List[endpointInfo] {
-	var items []endpointInfo
+	items := collectionlist.NewList[endpointInfo]()
 
 	if cfg.Control.Enabled && cfg.Control.Addr != "" {
-		items = append(items, endpointInfo{name: "control", scheme: "http", addr: cfg.Control.Addr})
+		items.Add(endpointInfo{name: "control", scheme: "http", addr: cfg.Control.Addr})
 	}
 	if cfg.Node.Enabled && cfg.Node.Addr != "" {
-		items = append(items, endpointInfo{name: "node", scheme: "tcp", addr: cfg.Node.Addr})
+		items.Add(endpointInfo{name: "node", scheme: "tcp", addr: cfg.Node.Addr})
 	}
 
 	if cfg.Frontend.Enabled && cfg.Frontend.Addr != "" {
-		items = append(items, endpointInfo{name: "frontend", scheme: "http", addr: cfg.Frontend.Addr})
+		items.Add(endpointInfo{name: "frontend", scheme: "http", addr: cfg.Frontend.Addr})
 	}
 	if cfg.Admin.Enabled && cfg.Admin.Addr != "" {
-		items = append(items, endpointInfo{name: "admin", scheme: "http", addr: cfg.Admin.Addr})
+		items.Add(endpointInfo{name: "admin", scheme: "http", addr: cfg.Admin.Addr})
 	}
 
-	return collectionlist.NewList(items...)
+	return items
 }
 
 func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags *pflag.FlagSet) error {
@@ -214,28 +215,28 @@ func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags
 		return err
 	}
 
-	modules := []dix.Module{
+	modules := collectionlist.NewList[dix.Module](
 		foundationModule(logger),
 		configModule(flags),
 		bannerModule(stdout),
-	}
+	)
 	if cfg.Control.Enabled {
-		modules = append(modules, controlModule())
+		modules.Add(controlModule())
 	}
 	if cfg.Node.Enabled {
-		modules = append(modules, nodeModule())
+		modules.Add(nodeModule())
 	}
 	if cfg.Frontend.Enabled {
-		modules = append(modules, frontendModule())
+		modules.Add(frontendModule())
 	}
 	if cfg.Admin.Enabled {
-		modules = append(modules, adminModule())
+		modules.Add(adminModule())
 	}
 
 	app := dix.New("nespa",
 		dix.WithLogger(logger),
 		dix.WithRecentEvents(128),
-		dix.WithModules(modules...),
+		dix.WithModules(modules.Values()...),
 		dix.WithRunStopTimeout(5*time.Second),
 	)
 
@@ -247,10 +248,23 @@ func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags
 
 func validateServerConfig(cfg serverConfig) error {
 	if !cfg.Control.Enabled && !cfg.Node.Enabled && !cfg.Frontend.Enabled && !cfg.Admin.Enabled {
-		return fmt.Errorf("at least one service must be enabled")
+		return fmt.Errorf("validate server config: %w",
+			oops.Code("invalid_server_config").
+				In("cmd").
+				With(
+					"control_enabled", cfg.Control.Enabled,
+					"node_enabled", cfg.Node.Enabled,
+					"frontend_enabled", cfg.Frontend.Enabled,
+					"admin_enabled", cfg.Admin.Enabled,
+				).
+				New("at least one service must be enabled"))
 	}
 	if cfg.Admin.Enabled && (!cfg.Control.Enabled || !cfg.Node.Enabled) {
-		return fmt.Errorf("admin service requires colocated control and node services")
+		return fmt.Errorf("validate server config: %w",
+			oops.Code("invalid_server_config").
+				In("cmd").
+				With("admin_enabled", cfg.Admin.Enabled, "control_enabled", cfg.Control.Enabled, "node_enabled", cfg.Node.Enabled).
+				New("admin service requires colocated control and node services"))
 	}
 	return nil
 }

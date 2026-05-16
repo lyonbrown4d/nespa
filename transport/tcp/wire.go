@@ -4,12 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/lyonbrown4d/nespa/cache"
-	"github.com/lyonbrown4d/nespa/cache/engine"
 	"github.com/lyonbrown4d/nespa/cachewire"
 	"github.com/lyonbrown4d/nespa/protocol"
+	"github.com/samber/oops"
+)
+
+const (
+	oopsCodeQuotaExceeded      = "quota_exceeded"
+	oopsCodeInvalidKey         = "invalid_key"
+	oopsCodeInvalidCounter     = "invalid_counter"
+	oopsCodeInvalidCounterText = "invalid_counter_value"
+	oopsCodeCounterOverflow    = "counter_overflow"
 )
 
 func metadataFrame(request protocol.Frame, metadata, payload []byte) protocol.Frame {
@@ -25,12 +34,12 @@ func metadataFrame(request protocol.Frame, metadata, payload []byte) protocol.Fr
 
 func cacheErrorFrame(request protocol.Frame, err error) protocol.Frame {
 	switch {
-	case errors.Is(err, cache.ErrQuotaExceeded):
-		return errorFrame(request, protocol.ErrorTooLarge, err)
-	case errors.Is(err, engine.ErrInvalidKey):
+	case hasOopsCode(err, oopsCodeInvalidKey):
 		return errorFrame(request, protocol.ErrorBadFrame, err)
-	case errors.Is(err, engine.ErrInvalidCounter):
+	case hasOopsCode(err, oopsCodeInvalidCounter, oopsCodeInvalidCounterText, oopsCodeCounterOverflow):
 		return errorFrame(request, protocol.ErrorInvalidArgument, err)
+	case hasOopsCode(err, oopsCodeQuotaExceeded):
+		return errorFrame(request, protocol.ErrorTooLarge, err)
 	case errors.Is(err, context.DeadlineExceeded):
 		return errorFrame(request, protocol.ErrorTimeout, err)
 	case errors.Is(err, context.Canceled):
@@ -38,6 +47,23 @@ func cacheErrorFrame(request protocol.Frame, err error) protocol.Frame {
 	default:
 		return errorFrame(request, protocol.ErrorInternal, err)
 	}
+}
+
+func hasOopsCode(err error, codes ...string) bool {
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		oopsErr, ok := oops.AsOops(current)
+		if !ok {
+			continue
+		}
+		code, ok := oopsErr.Code().(string)
+		if !ok {
+			continue
+		}
+		if slices.Contains(codes, code) {
+			return true
+		}
+	}
+	return false
 }
 
 func errorFrame(request protocol.Frame, code protocol.ErrorCode, err error) protocol.Frame {

@@ -1,17 +1,18 @@
 package control
 
 import (
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/samber/oops"
 )
 
 var (
-	ErrInvalidNamespace  = errors.New("control: invalid namespace")
-	ErrInvalidSpace      = errors.New("control: invalid space")
-	ErrInvalidEntity     = errors.New("control: invalid entity")
-	ErrNamespaceNotFound = errors.New("control: namespace not found")
-	ErrSpaceNotFound     = errors.New("control: space not found")
+	ErrInvalidNamespace  = oops.Code("invalid_namespace").In("control.catalog").New("control: invalid namespace")
+	ErrInvalidSpace      = oops.Code("invalid_space").In("control.catalog").New("control: invalid space")
+	ErrInvalidEntity     = oops.Code("invalid_entity").In("control.catalog").New("control: invalid entity")
+	ErrNamespaceNotFound = oops.Code("namespace_not_found").In("control.catalog").New("control: namespace not found")
+	ErrSpaceNotFound     = oops.Code("space_not_found").In("control.catalog").New("control: space not found")
 )
 
 func normalizeNamespace(namespace string) (string, error) {

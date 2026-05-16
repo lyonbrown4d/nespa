@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lyonbrown4d/nespa/cachewire"
+	"github.com/samber/oops"
 )
 
 const defaultCounterMaxRetries = 8
@@ -103,11 +104,17 @@ func applyCounter(ctx context.Context, request CounterRequest, get counterGetFun
 		}
 
 		if attempt >= maxRetries {
-			return CounterResult{}, fmt.Errorf("counter retries exhausted: %d", maxRetries)
+			return CounterResult{}, fmt.Errorf("apply counter: %w", oops.Code("counter_retries_exhausted").
+				In("client.counter").
+				With("max_retries", maxRetries).
+				Errorf("counter retries exhausted: %d", maxRetries))
 		}
 	}
 
-	return CounterResult{}, fmt.Errorf("counter retries exhausted: %d", maxRetries)
+	return CounterResult{}, fmt.Errorf("apply counter: %w", oops.Code("counter_retries_exhausted").
+		In("client.counter").
+		With("max_retries", maxRetries).
+		Errorf("counter retries exhausted: %d", maxRetries))
 }
 
 type currentCounterResult struct {
@@ -131,7 +138,7 @@ func currentCounter(ctx context.Context, get counterGetFunc, request CounterRequ
 	if !record.Found {
 		next, overflow := safeAdd(request.InitialValue, request.Delta)
 		if overflow {
-			return currentCounterResult{}, fmt.Errorf("counter arithmetic overflow")
+			return currentCounterResult{}, counterOverflowError(request.InitialValue, request.Delta)
 		}
 		return currentCounterResult{
 			next:             next,
@@ -149,7 +156,7 @@ func currentCounter(ctx context.Context, get counterGetFunc, request CounterRequ
 
 	next, overflow := safeAdd(decoded, request.Delta)
 	if overflow {
-		return currentCounterResult{}, fmt.Errorf("counter arithmetic overflow")
+		return currentCounterResult{}, counterOverflowError(decoded, request.Delta)
 	}
 
 	return currentCounterResult{
@@ -165,9 +172,19 @@ func parseInt64(raw []byte) (int64, error) {
 	text := strings.TrimSpace(string(raw))
 	value, err := strconv.ParseInt(text, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("counter value must be int64: %w", err)
+		return 0, fmt.Errorf("parse counter value: %w", oops.Code("invalid_counter_value").
+			In("client.counter").
+			With("value", text).
+			Wrap(err))
 	}
 	return value, nil
+}
+
+func counterOverflowError(base, delta int64) error {
+	return fmt.Errorf("calculate counter value: %w", oops.Code("counter_overflow").
+		In("client.counter").
+		With("base", base, "delta", delta).
+		New("counter arithmetic overflow"))
 }
 
 func recordTTLMillis(expireAtUnixMs int64, now time.Time) int64 {

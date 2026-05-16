@@ -1,11 +1,14 @@
 package control
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
 
+	collectionlist "github.com/arcgolabs/collectionx/list"
 	collectionmapping "github.com/arcgolabs/collectionx/mapping"
+	"github.com/arcgolabs/eventx"
 	"github.com/lyonbrown4d/nespa/controlapi"
 )
 
@@ -14,7 +17,27 @@ const (
 	nodeStateHealthy     = "healthy"
 	nodeStateSuspect     = "suspect"
 	nodeStateDead        = "dead"
+
+	rebalanceEventRouteTableChanged = "route_table_changed"
+	rebalanceReasonNodeRegistered   = "node_registered"
+	rebalanceReasonNodeAddress      = "node_address_changed"
+	rebalanceReasonNodeRecovered    = "node_recovered"
+	rebalanceReasonNodeSuspect      = "node_suspect"
+	rebalanceReasonNodeDead         = "node_dead"
+	rebalanceReasonSpaceCreated     = "space_created"
+
+	maxRebalanceEvents = 128
 )
+
+const RebalanceEventName = "control.rebalance"
+
+type RebalanceEvent struct {
+	Event controlapi.RebalanceEventBody
+}
+
+func (RebalanceEvent) Name() string {
+	return RebalanceEventName
+}
 
 type ControlState struct {
 	mu         sync.RWMutex
@@ -24,6 +47,9 @@ type ControlState struct {
 	spaces     *collectionmapping.Map[spaceRef, controlapi.SpaceBody]
 	entities   *collectionmapping.Map[entityRef, controlapi.EntityBody]
 	nodes      *collectionmapping.Map[string, controlapi.NodeBody]
+	events     *collectionlist.List[controlapi.RebalanceEventBody]
+	eventBus   eventx.BusRuntime
+	nextEvent  uint64
 	now        func() time.Time
 }
 
@@ -37,6 +63,14 @@ func NewControlState(clusterID string) *ControlState {
 }
 
 func NewControlStateWithClock(clusterID string, now func() time.Time) *ControlState {
+	return NewControlStateWithClockAndEvents(clusterID, now, nil)
+}
+
+func NewControlStateWithEvents(clusterID string, bus eventx.BusRuntime) *ControlState {
+	return NewControlStateWithClockAndEvents(clusterID, time.Now, bus)
+}
+
+func NewControlStateWithClockAndEvents(clusterID string, now func() time.Time, bus eventx.BusRuntime) *ControlState {
 	if now == nil {
 		now = time.Now
 	}
@@ -46,11 +80,13 @@ func NewControlStateWithClock(clusterID string, now func() time.Time) *ControlSt
 		spaces:     collectionmapping.NewMap[spaceRef, controlapi.SpaceBody](),
 		entities:   collectionmapping.NewMap[entityRef, controlapi.EntityBody](),
 		nodes:      collectionmapping.NewMap[string, controlapi.NodeBody](),
+		events:     collectionlist.NewList[controlapi.RebalanceEventBody](),
+		eventBus:   bus,
 		now:        now,
 	}
 }
 
-func (s *ControlState) RegisterNode(nodeID, addr string) (controlapi.RegisterNodeResponse, error) {
+func (s *ControlState) RegisterNode(ctx context.Context, nodeID, addr string) (controlapi.RegisterNodeResponse, error) {
 	nodeID, addr, err := validateNodeIdentity(nodeID, addr)
 	if err != nil {
 		return controlapi.RegisterNodeResponse{}, err
@@ -67,10 +103,17 @@ func (s *ControlState) RegisterNode(nodeID, addr string) (controlapi.RegisterNod
 	}
 
 	previous, exists := s.nodes.Get(nodeID)
-	if !exists || previous.Addr != addr || previous.State != node.State {
+	reason, changed := nodeRegistrationEventReason(previous, exists, node)
+	if changed {
 		s.revision++
 	}
 	s.nodes.Set(nodeID, node)
+	if changed {
+		s.recordRebalanceEventLocked(ctx, rebalanceEvent{
+			reason: rebalanceReason(reason),
+			node:   node,
+		})
+	}
 
 	return controlapi.RegisterNodeResponse{
 		Revision: s.revision,
@@ -78,7 +121,7 @@ func (s *ControlState) RegisterNode(nodeID, addr string) (controlapi.RegisterNod
 	}, nil
 }
 
-func (s *ControlState) Heartbeat(nodeID, addr string) (controlapi.HeartbeatResponse, error) {
+func (s *ControlState) Heartbeat(ctx context.Context, nodeID, addr string) (controlapi.HeartbeatResponse, error) {
 	nodeID, addr, err := validateNodeIdentity(nodeID, addr)
 	if err != nil {
 		return controlapi.HeartbeatResponse{}, err
@@ -88,6 +131,8 @@ func (s *ControlState) Heartbeat(nodeID, addr string) (controlapi.HeartbeatRespo
 	defer s.mu.Unlock()
 
 	node, exists := s.nodes.Get(nodeID)
+	var reason rebalanceReason
+	changed := false
 	if !exists {
 		node = controlapi.NodeBody{
 			NodeID: nodeID,
@@ -95,17 +140,29 @@ func (s *ControlState) Heartbeat(nodeID, addr string) (controlapi.HeartbeatRespo
 			State:  nodeStateHealthy,
 		}
 		s.revision++
+		reason = rebalanceReasonNodeRegistered
+		changed = true
 	}
 	if node.Addr != addr {
 		node.Addr = addr
 		s.revision++
+		reason = rebalanceReasonNodeAddress
+		changed = true
 	}
 	if node.State != nodeStateHealthy {
 		node.State = nodeStateHealthy
 		s.revision++
+		reason = rebalanceReasonNodeRecovered
+		changed = true
 	}
 	node.LastSeenUnix = s.now().Unix()
 	s.nodes.Set(nodeID, node)
+	if changed {
+		s.recordRebalanceEventLocked(ctx, rebalanceEvent{
+			reason: reason,
+			node:   node,
+		})
+	}
 
 	return controlapi.HeartbeatResponse{
 		Revision: s.revision,
@@ -113,7 +170,7 @@ func (s *ControlState) Heartbeat(nodeID, addr string) (controlapi.HeartbeatRespo
 	}, nil
 }
 
-func (s *ControlState) AdvanceLiveness(now time.Time, suspectAfter, deadAfter time.Duration) LivenessResult {
+func (s *ControlState) AdvanceLiveness(ctx context.Context, now time.Time, suspectAfter, deadAfter time.Duration) LivenessResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -140,6 +197,10 @@ func (s *ControlState) AdvanceLiveness(now time.Time, suspectAfter, deadAfter ti
 		s.nodes.Set(nodeID, node)
 		s.revision++
 		changed = append(changed, node)
+		s.recordRebalanceEventLocked(ctx, rebalanceEvent{
+			reason: livenessRebalanceReason(nextState),
+			node:   node,
+		})
 		return true
 	})
 
@@ -186,6 +247,16 @@ func (s *ControlState) RouteCount() int {
 	return len(routesForNodes(nodes, spaces))
 }
 
+func (s *ControlState) RebalanceEvents() controlapi.RebalanceEventsBody {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return controlapi.RebalanceEventsBody{
+		Revision: s.revision,
+		Events:   s.events.Values(),
+	}
+}
+
 func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -204,6 +275,68 @@ func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 		Entities:   entities,
 		Nodes:      nodes,
 		Routes:     routesForNodes(nodes, spaces),
+	}
+}
+
+type rebalanceReason string
+
+type rebalanceEvent struct {
+	reason    rebalanceReason
+	node      controlapi.NodeBody
+	namespace string
+	space     string
+}
+
+func nodeRegistrationEventReason(previous controlapi.NodeBody, exists bool, next controlapi.NodeBody) (string, bool) {
+	switch {
+	case !exists:
+		return rebalanceReasonNodeRegistered, true
+	case previous.Addr != next.Addr:
+		return rebalanceReasonNodeAddress, true
+	case previous.State != next.State:
+		return rebalanceReasonNodeRecovered, true
+	default:
+		return "", false
+	}
+}
+
+func livenessRebalanceReason(state string) rebalanceReason {
+	switch state {
+	case nodeStateSuspect:
+		return rebalanceReasonNodeSuspect
+	case nodeStateDead:
+		return rebalanceReasonNodeDead
+	default:
+		return rebalanceReasonNodeRecovered
+	}
+}
+
+func (s *ControlState) recordRebalanceEventLocked(ctx context.Context, event rebalanceEvent) {
+	if event.reason == "" {
+		return
+	}
+	s.nextEvent++
+	body := controlapi.RebalanceEventBody{
+		ID:            s.nextEvent,
+		Revision:      s.revision,
+		Type:          rebalanceEventRouteTableChanged,
+		Reason:        string(event.reason),
+		NodeID:        event.node.NodeID,
+		Addr:          event.node.Addr,
+		State:         event.node.State,
+		Namespace:     event.namespace,
+		Space:         event.space,
+		RouteCount:    len(routesForNodes(s.sortedNodesLocked(), s.sortedSpacesLocked())),
+		CreatedAtUnix: s.now().Unix(),
+	}
+	s.events.Add(body)
+	for s.events.Len() > maxRebalanceEvents {
+		s.events.RemoveAt(0)
+	}
+	if s.eventBus != nil {
+		if err := s.eventBus.PublishAsync(ctx, RebalanceEvent{Event: body}); err != nil {
+			return
+		}
 	}
 }
 

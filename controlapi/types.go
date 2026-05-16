@@ -60,6 +60,25 @@ type SnapshotBody struct {
 	Routes     []RouteBody     `json:"routes"`
 }
 
+type RebalanceEventBody struct {
+	ID            uint64 `json:"id"`
+	Revision      uint64 `json:"revision"`
+	Type          string `json:"type"`
+	Reason        string `json:"reason"`
+	NodeID        string `json:"node_id,omitempty"`
+	Addr          string `json:"addr,omitempty"`
+	State         string `json:"state,omitempty"`
+	Namespace     string `json:"namespace,omitempty"`
+	Space         string `json:"space,omitempty"`
+	RouteCount    int    `json:"route_count"`
+	CreatedAtUnix int64  `json:"created_at_unix"`
+}
+
+type RebalanceEventsBody struct {
+	Revision uint64               `json:"revision"`
+	Events   []RebalanceEventBody `json:"events"`
+}
+
 type NodesBody struct {
 	Revision uint64     `json:"revision"`
 	Nodes    []NodeBody `json:"nodes"`

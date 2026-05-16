@@ -6,11 +6,14 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/arcgolabs/eventx"
 	"github.com/arcgolabs/httpx"
 	"github.com/lyonbrown4d/nespa/controlapi"
 	"github.com/lyonbrown4d/nespa/runtime"
+	"github.com/samber/oops"
 )
 
 type Config struct {
@@ -33,9 +36,13 @@ type ServiceRuntime struct {
 }
 
 func NewServiceRuntime(cfg Config) *ServiceRuntime {
-	state := NewControlState(cfg.ClusterID)
+	return NewServiceRuntimeWithEvents(cfg, nil)
+}
+
+func NewServiceRuntimeWithEvents(cfg Config, bus eventx.BusRuntime) *ServiceRuntime {
+	state := NewControlStateWithEvents(cfg.ClusterID, bus)
 	for _, node := range cfg.BootstrapNodes {
-		if _, err := state.RegisterNode(node.NodeID, node.Addr); err != nil {
+		if _, err := state.RegisterNode(context.Background(), node.NodeID, node.Addr); err != nil {
 			continue
 		}
 	}
@@ -64,7 +71,7 @@ func (s *ServiceRuntime) Revision() uint64 {
 }
 
 func (s *ServiceRuntime) RouteCount() uint64 {
-	return uint64(s.state.RouteCount())
+	return checkedUint64(s.state.RouteCount())
 }
 
 func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
@@ -81,18 +88,53 @@ func HTTPConfig(svc *ServiceRuntime) runtime.HTTPConfig {
 
 func controlStateError(message string, err error) error {
 	switch {
-	case errors.Is(err, ErrNamespaceNotFound), errors.Is(err, ErrSpaceNotFound):
+	case hasControlOopsCode(err, "namespace_not_found", "space_not_found"):
 		return httpx.NewError(http.StatusNotFound, message, err)
-	case errors.Is(err, ErrInvalidNode), errors.Is(err, ErrInvalidNamespace), errors.Is(err, ErrInvalidSpace), errors.Is(err, ErrInvalidEntity):
+	case hasControlOopsCode(err, "invalid_node", "invalid_namespace", "invalid_space", "invalid_entity"):
 		return httpx.NewError(http.StatusBadRequest, message, err)
 	default:
 		return httpx.NewError(http.StatusInternalServerError, message, err)
 	}
 }
 
+func hasControlOopsCode(err error, codes ...string) bool {
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		oopsErr, ok := oops.AsOops(current)
+		if !ok {
+			continue
+		}
+		code, ok := oopsErr.Code().(string)
+		if !ok {
+			continue
+		}
+		if slices.Contains(codes, code) {
+			return true
+		}
+	}
+	return false
+}
+
 func StartLiveness(ctx context.Context, logger *slog.Logger, svc *ServiceRuntime) error {
 	go runLivenessSweep(ctx, logger, svc.state, svc.liveness)
 	return nil
+}
+
+func SubscribeRebalanceEvents(_ context.Context, logger *slog.Logger, bus eventx.BusRuntime) error {
+	_, err := eventx.Subscribe[RebalanceEvent](bus, func(_ context.Context, event RebalanceEvent) error {
+		body := event.Event
+		logger.Info("control rebalance event",
+			"event_id", body.ID,
+			"revision", body.Revision,
+			"reason", body.Reason,
+			"node_id", body.NodeID,
+			"state", body.State,
+			"namespace", body.Namespace,
+			"space", body.Space,
+			"route_count", body.RouteCount,
+		)
+		return nil
+	})
+	return err
 }
 
 func normalizeLivenessConfig(cfg LivenessConfig) LivenessConfig {
@@ -120,7 +162,7 @@ func runLivenessSweep(ctx context.Context, logger *slog.Logger, state *ControlSt
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			result := state.AdvanceLiveness(now, cfg.SuspectAfter, cfg.DeadAfter)
+			result := state.AdvanceLiveness(ctx, now, cfg.SuspectAfter, cfg.DeadAfter)
 			for _, node := range result.Changed {
 				logger.Warn("control node liveness changed", "node_id", node.NodeID, "state", node.State, "revision", result.Revision)
 			}

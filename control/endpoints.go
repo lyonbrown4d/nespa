@@ -47,6 +47,7 @@ func (e *readEndpoint) Register(registrar httpx.Registrar) {
 	scope := registrar.Scope()
 	httpx.MustGroupGet(scope, "/state", e.State)
 	httpx.MustGroupGet(scope, "/snapshot", e.Snapshot)
+	httpx.MustGroupGet(scope, "/rebalance/events", e.RebalanceEvents)
 }
 
 func (e *readEndpoint) State(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.StateBody], error) {
@@ -55,6 +56,10 @@ func (e *readEndpoint) State(context.Context, *runtime.EmptyInput) (*runtime.JSO
 
 func (e *readEndpoint) Snapshot(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.SnapshotBody], error) {
 	return runtime.JSON(e.state.Snapshot()), nil
+}
+
+func (e *readEndpoint) RebalanceEvents(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[controlapi.RebalanceEventsBody], error) {
+	return runtime.JSON(e.state.RebalanceEvents()), nil
 }
 
 func (e *catalogEndpoint) controlEndpoint() {}
@@ -106,10 +111,10 @@ func (e *catalogEndpoint) Spaces(context.Context, *runtime.EmptyInput) (*runtime
 }
 
 func (e *catalogEndpoint) CreateSpace(
-	_ context.Context,
+	ctx context.Context,
 	input *controlapi.CreateSpaceInput,
 ) (*runtime.JSONResponse[controlapi.CreateSpaceResponse], error) {
-	response, err := e.state.CreateSpace(input.Body.Namespace, input.Body.Space)
+	response, err := e.state.CreateSpace(ctx, input.Body.Namespace, input.Body.Space)
 	if err != nil {
 		return nil, controlStateError("create space failed", err)
 	}
@@ -160,10 +165,10 @@ func (e *nodeEndpoint) Nodes(context.Context, *runtime.EmptyInput) (*runtime.JSO
 }
 
 func (e *nodeEndpoint) RegisterNode(
-	_ context.Context,
+	ctx context.Context,
 	input *controlapi.RegisterNodeInput,
 ) (*runtime.JSONResponse[controlapi.RegisterNodeResponse], error) {
-	response, err := e.state.RegisterNode(input.Body.NodeID, input.Body.Addr)
+	response, err := e.state.RegisterNode(ctx, input.Body.NodeID, input.Body.Addr)
 	if err != nil {
 		return nil, controlStateError("invalid node registration", err)
 	}
@@ -171,10 +176,10 @@ func (e *nodeEndpoint) RegisterNode(
 }
 
 func (e *nodeEndpoint) Heartbeat(
-	_ context.Context,
+	ctx context.Context,
 	input *controlapi.HeartbeatInput,
 ) (*runtime.JSONResponse[controlapi.HeartbeatResponse], error) {
-	response, err := e.state.Heartbeat(input.Body.NodeID, input.Body.Addr)
+	response, err := e.state.Heartbeat(ctx, input.Body.NodeID, input.Body.Addr)
 	if err != nil {
 		return nil, controlStateError("invalid node heartbeat", err)
 	}

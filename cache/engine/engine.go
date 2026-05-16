@@ -3,17 +3,19 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
+
+	collectionmapping "github.com/arcgolabs/collectionx/mapping"
+	"github.com/samber/oops"
 )
 
 var (
-	ErrInvalidKey     = errors.New("engine: invalid key")
-	ErrNotFound       = errors.New("engine: not found")
-	ErrClosed         = errors.New("engine: closed")
-	ErrNilContext     = errors.New("engine: nil context")
-	ErrInvalidCounter = errors.New("engine: invalid counter value")
+	ErrInvalidKey     = oops.Code("invalid_key").In("cache.engine").New("engine: invalid key")
+	ErrNotFound       = oops.Code("not_found").In("cache.engine").New("engine: not found")
+	ErrClosed         = oops.Code("closed").In("cache.engine").New("engine: closed")
+	ErrNilContext     = oops.Code("nil_context").In("cache.engine").New("engine: nil context")
+	ErrInvalidCounter = oops.Code("invalid_counter").In("cache.engine").New("engine: invalid counter value")
 )
 
 type Config struct {
@@ -154,8 +156,8 @@ type shardWorker struct {
 	id       int
 	commands chan shardCommand
 
-	entries     map[string]*entry
-	spaces      map[spaceKey]spaceUsage
+	entries     *collectionmapping.Map[string, *entry]
+	spaces      *collectionmapping.Map[spaceKey, spaceUsage]
 	objects     uint64
 	memoryBytes uint64
 	evictions   uint64
@@ -212,7 +214,7 @@ type shardResult struct {
 	deleted bool
 	touched bool
 	stats   ShardStats
-	spaces  map[spaceKey]spaceUsage
+	spaces  *collectionmapping.Map[spaceKey, spaceUsage]
 	swept   uint64
 	evicted EvictResult
 	err     error

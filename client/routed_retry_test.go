@@ -103,6 +103,132 @@ func TestRoutedTCPClientRefreshesAndRetriesStaleBatchRouteEpoch(t *testing.T) {
 	}
 }
 
+func TestRoutedTCPClientRefreshesAfterDeadNodeDialError(t *testing.T) {
+	firstEngine := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, firstEngine)
+	secondEngine := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, secondEngine)
+
+	var firstEpoch atomic.Uint64
+	firstEpoch.Store(1)
+	firstNode := cachetcp.NewServer(cachetcp.ServerConfig{
+		Addr:              "127.0.0.1:0",
+		CurrentRouteEpoch: firstEpoch.Load,
+	}, cache.NewService(firstEngine))
+	if err := firstNode.Start(t.Context(), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start first cache server: %v", err)
+	}
+	defer stopServer(t, firstNode)
+
+	secondNode := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(secondEngine))
+	if err := secondNode.Start(t.Context(), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start second cache server: %v", err)
+	}
+	defer stopServer(t, secondNode)
+
+	routes := splitRoutes(firstNode.Addr(), secondNode.Addr())
+	control := newSnapshotServer(t, snapshotForRoutes(1, 1, routes))
+	defer control.Close()
+
+	routed, err := client.NewRoutedTCP(client.RoutedConfig{ControlAddr: control.URL})
+	if err != nil {
+		t.Fatalf("new routed client: %v", err)
+	}
+	if refreshErr := routed.Refresh(t.Context()); refreshErr != nil {
+		t.Fatalf("initial refresh: %v", refreshErr)
+	}
+
+	key := keyForVSlotRange(t, 32768, controlapi.VSlotMax)
+	stopServer(t, secondNode)
+	firstEpoch.Store(2)
+	control.Set(snapshotForRoutes(2, 2, singleRoute(firstNode.Addr())))
+
+	record, err := routed.Set(t.Context(), cachewire.SetRequest{
+		Key:   cachewire.Key{Namespace: "orders", Space: "session", Key: key},
+		Value: []byte("after-shrink"),
+	})
+	if err != nil {
+		t.Fatalf("set after dead node route shrink: %v", err)
+	}
+	if !record.Found || record.NamespaceVersion != 2 || record.SpaceVersion != 2 {
+		t.Fatalf("record after route shrink = %+v", record)
+	}
+
+	firstClient := cachetcp.NewClient()
+	got, err := firstClient.Get(t.Context(), firstNode.Addr(), cachewire.GetRequest{
+		Key: cachewire.Key{Namespace: "orders", Space: "session", Key: key},
+	})
+	if err != nil {
+		t.Fatalf("get first node record: %v", err)
+	}
+	if !got.Found || string(got.Value) != "after-shrink" {
+		t.Fatalf("record should be written to surviving node: %+v", got)
+	}
+}
+
+func TestRoutedTCPClientRetriesDeadBatchGroupAfterRouteRefresh(t *testing.T) {
+	firstEngine := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, firstEngine)
+	secondEngine := engine.NewMemory(engine.Config{ShardCount: 2})
+	defer closeEngine(t, secondEngine)
+
+	var firstEpoch atomic.Uint64
+	firstEpoch.Store(1)
+	firstNode := cachetcp.NewServer(cachetcp.ServerConfig{
+		Addr:              "127.0.0.1:0",
+		CurrentRouteEpoch: firstEpoch.Load,
+	}, cache.NewService(firstEngine))
+	if err := firstNode.Start(t.Context(), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start first cache server: %v", err)
+	}
+	defer stopServer(t, firstNode)
+
+	secondNode := cachetcp.NewServer(cachetcp.ServerConfig{Addr: "127.0.0.1:0"}, cache.NewService(secondEngine))
+	if err := secondNode.Start(t.Context(), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("start second cache server: %v", err)
+	}
+	defer stopServer(t, secondNode)
+
+	control := newSnapshotServer(t, snapshotForRoutes(1, 1, splitRoutes(firstNode.Addr(), secondNode.Addr())))
+	defer control.Close()
+
+	routed, err := client.NewRoutedTCP(client.RoutedConfig{ControlAddr: control.URL})
+	if err != nil {
+		t.Fatalf("new routed client: %v", err)
+	}
+	if refreshErr := routed.Refresh(t.Context()); refreshErr != nil {
+		t.Fatalf("initial refresh: %v", refreshErr)
+	}
+
+	firstKey := keyForVSlotRange(t, 0, 32767)
+	secondKey := keyForVSlotRange(t, 32768, controlapi.VSlotMax)
+	stopServer(t, secondNode)
+	firstEpoch.Store(2)
+	control.Set(snapshotForRoutes(2, 2, singleRoute(firstNode.Addr())))
+
+	response, err := routed.BatchSet(t.Context(), cachewire.BatchSetRequest{Items: []cachewire.SetRequest{
+		{Key: cachewire.Key{Namespace: "orders", Space: "session", Key: firstKey}, Value: []byte("first")},
+		{Key: cachewire.Key{Namespace: "orders", Space: "session", Key: secondKey}, Value: []byte("second")},
+	}})
+	if err != nil {
+		t.Fatalf("batch set after dead node route shrink: %v", err)
+	}
+	if len(response.Records) != 2 {
+		t.Fatalf("records len = %d, want 2", len(response.Records))
+	}
+
+	firstClient := cachetcp.NewClient()
+	second, err := firstClient.Get(t.Context(), firstNode.Addr(), cachewire.GetRequest{
+		Key: cachewire.Key{Namespace: "orders", Space: "session", Key: secondKey},
+	})
+	if err != nil {
+		t.Fatalf("get retried batch record: %v", err)
+	}
+	if !second.Found || string(second.Value) != "second" {
+		t.Fatalf("dead-node batch item should be retried on surviving node: %+v", second)
+	}
+}
+
 func TestRoutedTCPClientRetriesOnlyUnsentBatchGroups(t *testing.T) {
 	firstEngine := engine.NewMemory(engine.Config{ShardCount: 2})
 	defer closeEngine(t, firstEngine)
@@ -162,8 +288,8 @@ func TestRoutedTCPClientRetriesOnlyUnsentBatchGroups(t *testing.T) {
 		t.Fatalf("initial refresh: %v", refreshErr)
 	}
 
-	keyFirst := keyForVSlotRange(t, "orders", "session", 0, 32767)
-	keySecond := keyForVSlotRange(t, "orders", "session", 32768, 65535)
+	keyFirst := keyForVSlotRange(t, 0, 32767)
+	keySecond := keyForVSlotRange(t, 32768, 65535)
 	if keyFirst == keySecond {
 		t.Fatalf("generated duplicate test keys")
 	}
@@ -254,20 +380,26 @@ func TestRoutedTCPClientRetriesOnlyUnsentBatchGroups(t *testing.T) {
 		t.Fatalf("second key should be found")
 	}
 
-	firstForSecond, _ := firstClient.Get(t.Context(), firstNode.Addr(), cachewire.GetRequest{
+	firstForSecond, err := firstClient.Get(t.Context(), firstNode.Addr(), cachewire.GetRequest{
 		Key: cachewire.Key{
 			Namespace: "orders",
 			Space:     "session",
 			Key:       keySecond,
 		},
 	})
-	secondForFirst, _ := secondClient.Get(t.Context(), secondNode.Addr(), cachewire.GetRequest{
+	if err != nil {
+		t.Fatalf("cross-check second key on first node: %v", err)
+	}
+	secondForFirst, err := secondClient.Get(t.Context(), secondNode.Addr(), cachewire.GetRequest{
 		Key: cachewire.Key{
 			Namespace: "orders",
 			Space:     "session",
 			Key:       keyFirst,
 		},
 	})
+	if err != nil {
+		t.Fatalf("cross-check first key on second node: %v", err)
+	}
 	t.Logf("cross-check firstNode has keySecond found=%v version=%d, secondNode has keyFirst found=%v version=%d", firstForSecond.Found, firstForSecond.Version, secondForFirst.Found, secondForFirst.Version)
 
 	if firstForSecond.Found || secondForFirst.Found {
@@ -298,6 +430,40 @@ func TestRoutedTCPClientRetriesOnlyUnsentBatchGroups(t *testing.T) {
 	}
 }
 
+func splitRoutes(firstAddr, secondAddr string) []controlapi.RouteBody {
+	return []controlapi.RouteBody{
+		{
+			Namespace:  "orders",
+			Space:      "session",
+			VSlotStart: 0,
+			VSlotEnd:   32767,
+			NodeID:     "node-first",
+			Addr:       firstAddr,
+		},
+		{
+			Namespace:  "orders",
+			Space:      "session",
+			VSlotStart: 32768,
+			VSlotEnd:   controlapi.VSlotMax,
+			NodeID:     "node-second",
+			Addr:       secondAddr,
+		},
+	}
+}
+
+func singleRoute(addr string) []controlapi.RouteBody {
+	return []controlapi.RouteBody{
+		{
+			Namespace:  "orders",
+			Space:      "session",
+			VSlotStart: 0,
+			VSlotEnd:   controlapi.VSlotMax,
+			NodeID:     "node-first",
+			Addr:       addr,
+		},
+	}
+}
+
 func snapshotForRoutes(revision, version uint64, routes []controlapi.RouteBody) controlapi.SnapshotBody {
 	return controlapi.SnapshotBody{
 		Revision: revision,
@@ -311,11 +477,11 @@ func snapshotForRoutes(revision, version uint64, routes []controlapi.RouteBody) 
 	}
 }
 
-func keyForVSlotRange(t *testing.T, namespace, space string, start, end uint32) string {
+func keyForVSlotRange(t *testing.T, start, end uint32) string {
 	t.Helper()
-	for seq := 0; seq < 1_000_000; seq++ {
-		key := fmt.Sprintf("routed-key-%s-%d", namespace, seq)
-		slot := routing.VSlotFor(namespace, space, key)
+	for seq := range 1_000_000 {
+		key := fmt.Sprintf("routed-key-orders-%d", seq)
+		slot := routing.VSlotFor("orders", "session", key)
 		if slot >= start && slot <= end {
 			return key
 		}

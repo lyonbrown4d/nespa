@@ -85,7 +85,7 @@ func endpointListValues[E httpx.Endpoint](endpoints *collectionlist.List[E]) []h
 func controlModule() dix.Module {
 	return dix.NewModule("control",
 		dix.WithModuleProviders(
-			dix.Provider1(control.NewServiceRuntime),
+			dix.Provider2(control.NewServiceRuntimeWithEvents),
 			dix.Contribute1[control.Endpoint, *control.ServiceRuntime](control.NewReadEndpoint, dix.Order(10)),
 			dix.Contribute1[control.Endpoint, *control.ServiceRuntime](control.NewCatalogEndpoint, dix.Order(20)),
 			dix.Contribute1[control.Endpoint, *control.ServiceRuntime](control.NewNodeEndpoint, dix.Order(30)),
@@ -94,6 +94,7 @@ func controlModule() dix.Module {
 			configuredHTTPModule[*control.ServiceRuntime, control.Endpoint]("control", control.HTTPConfig),
 		),
 		dix.WithModuleHooks(
+			dix.OnStart2[*slog.Logger, eventx.BusRuntime](control.SubscribeRebalanceEvents, dix.LifecycleName("control.rebalance.subscribe"), dix.LifecycleBefore("control.http.start")),
 			dix.OnStart2[*slog.Logger, *control.ServiceRuntime](control.StartLiveness, dix.LifecycleName("control.liveness.start"), dix.LifecycleAfter("control.http.start")),
 		),
 	)

@@ -30,11 +30,15 @@ go run ./cmd
 
 ```bash
 pwsh ./scripts/smoke.ps1
+pwsh ./scripts/smoke-multinode.ps1
 ```
 
 The smoke script starts a local core server, creates `orders/session/SessionView`
 catalog metadata, waits for route materialization, runs a routed TCP set/get, and
 validates admin summary when admin is enabled.
+The multinode smoke starts one control process and two data-node processes,
+validates cross-node routed batch writes, stops one node, waits for route shrink,
+and verifies writes continue through the surviving route.
 
 Optional overrides and feature toggles can be passed, e.g.:
 
@@ -73,6 +77,7 @@ curl http://127.0.0.1:7401/v1/control/namespaces
 curl http://127.0.0.1:7401/v1/control/spaces
 curl http://127.0.0.1:7401/v1/control/entities
 curl http://127.0.0.1:7401/v1/control/nodes
+curl http://127.0.0.1:7401/v1/control/rebalance/events
 # optional frontend route cache view
 curl http://127.0.0.1:7402/routes
 ```
@@ -174,6 +179,15 @@ carries raw cache value bytes. Protocol error frames still carry `cachewire.Erro
 JSON. Batch set/get metadata stores payload offsets so values do not need to be
 JSON encoded. DataNodes reject non-zero `route_epoch` values older than the
 node's latest observed control revision. The frame codec lives in `protocol`.
+Routed clients refresh the control snapshot and retry once when a node reports a
+stale route or when a dead-node connection fails and the refreshed route has
+changed.
+
+The control plane exposes a narrow rebalance event view at
+`/v1/control/rebalance/events`. It records route-table changes such as node join,
+node suspect/dead, node recovery, address changes, and space route creation. This
+is currently an observability/control-state surface only; data migration and
+replication are not implemented in this stage.
 
 The data plane is intentionally a versioned binary KV plane (`set/get/delete/exists/touch/adjust`
 and batch variants). Redis command compatibility and native Redis data-structure
