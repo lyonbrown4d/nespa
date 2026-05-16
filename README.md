@@ -4,7 +4,8 @@ Nespa is a namespace-native, space-isolated, queryable distributed cache platfor
 
 This repository currently contains the first runnable scaffold: a Cobra-powered
 Go command that starts the control plane and data node as core services in one local
-server. Frontend and admin are optional via flags and can be disabled.
+server. The same binary can also run control-only or node-only by flag. Frontend
+and admin are optional services.
 
 The scaffold follows the design document's foundation-package direction:
 
@@ -31,32 +32,33 @@ go run ./cmd
 pwsh ./scripts/smoke.ps1
 ```
 
-The smoke script starts a local server, creates `orders/session/SessionView` catalog
-metadata, waits for route materialization, runs a routed TCP set/get, and
+The smoke script starts a local core server, creates `orders/session/SessionView`
+catalog metadata, waits for route materialization, runs a routed TCP set/get, and
 validates admin summary when admin is enabled.
 
 Optional overrides and feature toggles can be passed, e.g.:
 
 ```bash
-pwsh ./scripts/smoke.ps1 -ControlAddr 127.0.0.1:17401 -FrontendAddr 127.0.0.1:17402 -NodeAddr 127.0.0.1:17403 -AdminAddr 127.0.0.1:17404
-pwsh ./scripts/smoke.ps1 -ControlAddr 127.0.0.1:17401 -FrontendEnabled $false -AdminEnabled $false
+pwsh ./scripts/smoke.ps1 -ControlAddr 127.0.0.1:17401 -FrontendEnabled true -FrontendAddr 127.0.0.1:17402 -NodeAddr 127.0.0.1:17403 -AdminAddr 127.0.0.1:17404
+pwsh ./scripts/smoke.ps1 -ControlAddr 127.0.0.1:17401 -AdminEnabled false
 ```
 
 Default local endpoints:
 
 ```text
 control   http://127.0.0.1:7401
-frontend  http://127.0.0.1:7402 (optional, can be disabled)
 node      tcp://127.0.0.1:7403
-admin     http://127.0.0.1:7404 (optional, can be disabled)
+admin     http://127.0.0.1:7404 (optional)
+frontend  http://127.0.0.1:7402 (optional, disabled by default)
 ```
 
 Health checks:
 
 ```bash
 curl http://127.0.0.1:7401/healthz
-curl http://127.0.0.1:7402/healthz
 curl http://127.0.0.1:7404/healthz
+# optional frontend
+curl http://127.0.0.1:7402/healthz
 ```
 
 If frontend is disabled, skip `curl` calls against `http://127.0.0.1:7402/*`.
@@ -71,6 +73,7 @@ curl http://127.0.0.1:7401/v1/control/namespaces
 curl http://127.0.0.1:7401/v1/control/spaces
 curl http://127.0.0.1:7401/v1/control/entities
 curl http://127.0.0.1:7401/v1/control/nodes
+# optional frontend route cache view
 curl http://127.0.0.1:7402/routes
 ```
 
@@ -106,21 +109,31 @@ Useful startup flags:
 
 ```bash
 go run ./cmd \
+  --control-enabled=true \
   --control-addr 127.0.0.1:7401 \
   --control-cluster-id local \
-  --frontend-enabled true \
-  --frontend-addr 127.0.0.1:7402 \
+  --node-enabled=true \
   --node-addr 127.0.0.1:7403 \
   --node-id node-1 \
-  --admin-enabled true \
+  --admin-enabled=true \
   --admin-addr 127.0.0.1:7404
 ```
 ```bash
 go run ./cmd \
+  --control-enabled=true \
   --control-addr 127.0.0.1:7401 \
   --control-cluster-id local \
-  --frontend-enabled false \
-  --admin-enabled false
+  --node-enabled=false \
+  --admin-enabled=false
+```
+```bash
+go run ./cmd \
+  --control-enabled=false \
+  --control-addr 127.0.0.1:7401 \
+  --node-enabled=true \
+  --node-addr 127.0.0.1:7503 \
+  --node-id node-2 \
+  --admin-enabled=false
 ```
 
 Quota flags use bytes. A value of `0` disables that limit.

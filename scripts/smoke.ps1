@@ -4,7 +4,7 @@ param(
     [string]$FrontendAddr = "127.0.0.1:7402",
     [string]$NodeAddr = "127.0.0.1:7403",
     [string]$AdminAddr = "127.0.0.1:7404",
-    [string]$FrontendEnabled = "true",
+    [string]$FrontendEnabled = "false",
     [string]$AdminEnabled = "true",
     [string]$Namespace = "orders",
     [string]$Space = "session",
@@ -95,6 +95,18 @@ function Get-Json {
     return $response.Content | ConvertFrom-Json
 }
 
+function Invoke-Native {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments
+    )
+
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FilePath failed with exit code $LASTEXITCODE"
+    }
+}
+
 function Wait-SnapshotReady {
     $deadline = (Get-Date).AddSeconds(10)
     while ((Get-Date) -lt $deadline) {
@@ -108,31 +120,38 @@ function Wait-SnapshotReady {
 }
 
 function Invoke-SmokeClient {
-    & $clientExe -control-addr $ControlAddr -namespace $Namespace -space $Space -entity $Entity -key $Key -value $Value
+    Invoke-Native -FilePath $clientExe -Arguments @(
+        "-control-addr", $ControlAddr,
+        "-namespace", $Namespace,
+        "-space", $Space,
+        "-entity", $Entity,
+        "-key", $Key,
+        "-value", $Value
+    )
 }
 
 try {
 Write-Host "build server and client"
     Set-Location $repoRoot
-    go build -o $serverExe ./cmd
-    go build -o $clientExe ./scripts/smoke
+    Invoke-Native -FilePath "go" -Arguments @("build", "-o", $serverExe, "./cmd")
+    Invoke-Native -FilePath "go" -Arguments @("build", "-o", $clientExe, "./scripts/smoke")
     $frontendEnabled = Parse-Bool -Value $FrontendEnabled -Name "FrontendEnabled"
     $adminEnabled = Parse-Bool -Value $AdminEnabled -Name "AdminEnabled"
 
     Write-Host "start server"
+    $frontendEnabledArg = if ($frontendEnabled) { "true" } else { "false" }
+    $adminEnabledArg = if ($adminEnabled) { "true" } else { "false" }
     $serverArgs = @(
+        "--control-enabled=true",
         "--control-addr", $ControlAddr,
         "--control-cluster-id", "smoke",
-        "--frontend-enabled", (& {
-            if ($frontendEnabled) { "true" } else { "false" }
-        }),
+        "--frontend-enabled=$frontendEnabledArg",
         "--frontend-addr", $FrontendAddr,
+        "--node-enabled=true",
         "--node-addr", $NodeAddr,
         "--node-id", "smoke-node",
         "--node-heartbeat-interval", "${HeartbeatMs}ms",
-        "--admin-enabled", (& {
-            if ($adminEnabled) { "true" } else { "false" }
-        }),
+        "--admin-enabled=$adminEnabledArg",
         "--admin-addr", $AdminAddr
     )
     $server = Start-Process -FilePath $serverExe -ArgumentList $serverArgs -RedirectStandardOutput $serverLog -RedirectStandardError "$workDir\\server.err" -PassThru

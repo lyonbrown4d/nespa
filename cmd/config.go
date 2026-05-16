@@ -13,13 +13,15 @@ import (
 )
 
 func addServerFlags(flags *pflag.FlagSet) {
+	flags.Bool("control-enabled", true, "enable control-plane HTTP service")
 	flags.String("control-addr", "127.0.0.1:7401", "control-plane HTTP listen address")
 	flags.String("control-cluster-id", "local", "cluster identifier")
 	flags.Duration("control-liveness-sweep-interval", 5*time.Second, "control-plane node liveness sweep interval")
 	flags.Duration("control-liveness-suspect-after", 15*time.Second, "mark data nodes suspect after this heartbeat age")
 	flags.Duration("control-liveness-dead-after", 30*time.Second, "mark data nodes dead after this heartbeat age")
-	flags.Bool("frontend-enabled", true, "enable frontend webui/debug module")
+	flags.Bool("frontend-enabled", false, "enable optional frontend webui/debug module")
 	flags.String("frontend-addr", "127.0.0.1:7402", "frontend HTTP listen address")
+	flags.Bool("node-enabled", true, "enable data-node TCP service")
 	flags.String("node-addr", "127.0.0.1:7403", "data-node TCP listen address")
 	flags.String("node-id", "node-1", "data-node identifier")
 	flags.Duration("node-heartbeat-interval", 5*time.Second, "data-node control-plane heartbeat interval")
@@ -48,13 +50,15 @@ func configModule(flags *pflag.FlagSet) dix.Module {
 
 func serverDefaults() map[string]any {
 	return map[string]any{
+		"control.enabled":                   true,
 		"control.addr":                      "127.0.0.1:7401",
 		"control.cluster.id":                "local",
 		"control.liveness.sweep.interval":   5 * time.Second,
 		"control.liveness.suspect.after":    15 * time.Second,
 		"control.liveness.dead.after":       30 * time.Second,
-		"frontend.enabled":                  true,
+		"frontend.enabled":                  false,
 		"frontend.addr":                     "127.0.0.1:7402",
+		"node.enabled":                      true,
 		"node.addr":                         "127.0.0.1:7403",
 		"node.id":                           "node-1",
 		"node.heartbeat.interval":           5 * time.Second,

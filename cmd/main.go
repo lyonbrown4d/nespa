@@ -118,12 +118,14 @@ type controlLivenessConfig struct {
 }
 
 type controlConfig struct {
+	Enabled  bool                  `mapstructure:"enabled"`
 	Addr     string                `mapstructure:"addr"`
 	Cluster  identityConfig        `mapstructure:"cluster"`
 	Liveness controlLivenessConfig `mapstructure:"liveness"`
 }
 
 type nodeConfig struct {
+	Enabled   bool            `mapstructure:"enabled"`
 	Addr      string          `mapstructure:"addr"`
 	ID        string          `mapstructure:"id"`
 	Heartbeat heartbeatConfig `mapstructure:"heartbeat"`
@@ -174,15 +176,19 @@ func bannerModule(stdout io.Writer) dix.Module {
 					return fmt.Errorf("write startup endpoint: %w", writeErr)
 				}
 				return nil
-			}, dix.LifecycleName("server.banner.print"), dix.LifecycleBefore("control.http.start")),
+			}, dix.LifecycleName("server.banner.print")),
 		),
 	)
 }
 
 func endpoints(cfg serverConfig) *collectionlist.List[endpointInfo] {
-	items := []endpointInfo{
-		{name: "control", scheme: "http", addr: cfg.Control.Addr},
-		{name: "node", scheme: "tcp", addr: cfg.Node.Addr},
+	var items []endpointInfo
+
+	if cfg.Control.Enabled && cfg.Control.Addr != "" {
+		items = append(items, endpointInfo{name: "control", scheme: "http", addr: cfg.Control.Addr})
+	}
+	if cfg.Node.Enabled && cfg.Node.Addr != "" {
+		items = append(items, endpointInfo{name: "node", scheme: "tcp", addr: cfg.Node.Addr})
 	}
 
 	if cfg.Frontend.Enabled && cfg.Frontend.Addr != "" {
@@ -204,13 +210,20 @@ func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags
 	if err != nil {
 		return fmt.Errorf("load server config: %w", err)
 	}
+	if err := validateServerConfig(cfg); err != nil {
+		return err
+	}
 
 	modules := []dix.Module{
 		foundationModule(logger),
 		configModule(flags),
 		bannerModule(stdout),
-		controlModule(),
-		nodeModule(),
+	}
+	if cfg.Control.Enabled {
+		modules = append(modules, controlModule())
+	}
+	if cfg.Node.Enabled {
+		modules = append(modules, nodeModule())
 	}
 	if cfg.Frontend.Enabled {
 		modules = append(modules, frontendModule())
@@ -228,6 +241,16 @@ func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags
 
 	if err := app.RunContext(ctx); err != nil {
 		return fmt.Errorf("run nespa app: %w", err)
+	}
+	return nil
+}
+
+func validateServerConfig(cfg serverConfig) error {
+	if !cfg.Control.Enabled && !cfg.Node.Enabled && !cfg.Frontend.Enabled && !cfg.Admin.Enabled {
+		return fmt.Errorf("at least one service must be enabled")
+	}
+	if cfg.Admin.Enabled && (!cfg.Control.Enabled || !cfg.Node.Enabled) {
+		return fmt.Errorf("admin service requires colocated control and node services")
 	}
 	return nil
 }

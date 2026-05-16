@@ -14,6 +14,7 @@ func TestLoadServerConfigFromFlags(t *testing.T) {
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	addServerFlags(flags)
 	if err := flags.Parse([]string{
+		"--control-enabled=true",
 		"--control-addr", "127.0.0.1:9001",
 		"--control-cluster-id", "smoke",
 		"--control-liveness-sweep-interval", "1s",
@@ -22,6 +23,7 @@ func TestLoadServerConfigFromFlags(t *testing.T) {
 		"--frontend-enabled=false",
 		"--frontend-addr", "127.0.0.1:9002",
 		"--admin-enabled=false",
+		"--node-enabled=true",
 		"--node-addr", "127.0.0.1:9003",
 		"--node-id", "node-a",
 		"--node-heartbeat-interval", "4s",
@@ -44,9 +46,26 @@ func TestLoadServerConfigFromFlags(t *testing.T) {
 	assertConfigValues(t, cfg)
 }
 
+func TestServerDefaultsAreCoreOnly(t *testing.T) {
+	cfg, err := loadServerConfig(configSource{
+		Flags:     pflag.NewFlagSet("test", pflag.ContinueOnError),
+		EnvPrefix: "NESPA",
+		Defaults:  serverDefaults(),
+	})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.Control.Enabled || !cfg.Node.Enabled {
+		t.Fatalf("default core services should be enabled: %+v", cfg)
+	}
+	if cfg.Frontend.Enabled {
+		t.Fatalf("frontend should be disabled by default: %+v", cfg.Frontend)
+	}
+}
+
 func TestFrontendConfigUsesControlSnapshotOnly(t *testing.T) {
 	cfg := serverConfig{
-		Control: controlConfig{Addr: "127.0.0.1:7401"},
+		Control: controlConfig{Enabled: true, Addr: "127.0.0.1:7401"},
 		Frontend: frontendConfig{
 			Addr: "127.0.0.1:7402",
 		},
@@ -61,8 +80,8 @@ func TestFrontendConfigUsesControlSnapshotOnly(t *testing.T) {
 
 func TestEndpoints(t *testing.T) {
 	cfg := serverConfig{
-		Control: controlConfig{Addr: "127.0.0.1:7401"},
-		Node:    nodeConfig{Addr: "127.0.0.1:7403"},
+		Control: controlConfig{Enabled: true, Addr: "127.0.0.1:7401"},
+		Node:    nodeConfig{Enabled: true, Addr: "127.0.0.1:7403"},
 		Frontend: frontendConfig{
 			Enabled: true,
 			Addr:    "127.0.0.1:7402",
@@ -84,6 +103,32 @@ func TestEndpoints(t *testing.T) {
 	expect = []string{"control", "node"}
 	if !slices.Equal(got, expect) {
 		t.Fatalf("endpoints() = %v, want %v", got, expect)
+	}
+}
+
+func TestValidateServerConfig(t *testing.T) {
+	if err := validateServerConfig(serverConfig{
+		Control: controlConfig{Enabled: true},
+		Node:    nodeConfig{Enabled: true},
+		Admin:   endpointConfig{Enabled: true},
+	}); err != nil {
+		t.Fatalf("all-in-one config should be valid: %v", err)
+	}
+
+	if err := validateServerConfig(serverConfig{
+		Control: controlConfig{Enabled: false},
+		Node:    nodeConfig{Enabled: true},
+		Admin:   endpointConfig{Enabled: false},
+	}); err != nil {
+		t.Fatalf("node-only config should be valid: %v", err)
+	}
+
+	if err := validateServerConfig(serverConfig{
+		Control: controlConfig{Enabled: false},
+		Node:    nodeConfig{Enabled: true},
+		Admin:   endpointConfig{Enabled: true},
+	}); err == nil {
+		t.Fatal("admin without colocated control should be invalid")
 	}
 }
 
@@ -109,6 +154,7 @@ func assertConfigValues(t *testing.T, cfg serverConfig) {
 		got  any
 		want any
 	}{
+		{name: "control enabled", got: cfg.Control.Enabled, want: true},
 		{name: "control addr", got: cfg.Control.Addr, want: "127.0.0.1:9001"},
 		{name: "cluster id", got: cfg.Control.Cluster.ID, want: "smoke"},
 		{name: "liveness sweep", got: cfg.Control.Liveness.Sweep.Interval, want: time.Second},
@@ -117,6 +163,7 @@ func assertConfigValues(t *testing.T, cfg serverConfig) {
 		{name: "frontend enabled", got: cfg.Frontend.Enabled, want: false},
 		{name: "frontend addr", got: cfg.Frontend.Addr, want: "127.0.0.1:9002"},
 		{name: "admin enabled", got: cfg.Admin.Enabled, want: false},
+		{name: "node enabled", got: cfg.Node.Enabled, want: true},
 		{name: "node addr", got: cfg.Node.Addr, want: "127.0.0.1:9003"},
 		{name: "node id", got: cfg.Node.ID, want: "node-a"},
 		{name: "heartbeat interval", got: cfg.Node.Heartbeat.Interval, want: 4 * time.Second},
