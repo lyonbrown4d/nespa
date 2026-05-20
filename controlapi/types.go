@@ -40,13 +40,20 @@ type EntityBody struct {
 }
 
 type RouteBody struct {
-	Namespace  string `json:"namespace,omitempty"`
-	Space      string `json:"space,omitempty"`
-	VSlotStart uint32 `json:"vslot_start"`
-	VSlotEnd   uint32 `json:"vslot_end"`
-	NodeID     string `json:"node_id"`
-	Addr       string `json:"addr"`
-	Weight     uint32 `json:"weight"`
+	Namespace  string             `json:"namespace,omitempty"`
+	Space      string             `json:"space,omitempty"`
+	VSlotStart uint32             `json:"vslot_start"`
+	VSlotEnd   uint32             `json:"vslot_end"`
+	NodeID     string             `json:"node_id"`
+	Addr       string             `json:"addr"`
+	Weight     uint32             `json:"weight"`
+	Replicas   []RouteReplicaBody `json:"replicas,omitempty"`
+}
+
+type RouteReplicaBody struct {
+	NodeID string `json:"node_id"`
+	Addr   string `json:"addr"`
+	Weight uint32 `json:"weight"`
 }
 
 type SnapshotBody struct {

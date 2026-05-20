@@ -241,6 +241,9 @@ func assertSnapshotRoute(t *testing.T, snapshot controlapi.SnapshotBody, cluster
 	if snapshot.Routes[0].NodeID != nodeID || snapshot.Routes[0].Addr != addr {
 		t.Fatalf("unexpected route: %+v", snapshot.Routes[0])
 	}
+	if len(snapshot.Routes[0].Replicas) != 0 {
+		t.Fatalf("single-node route replicas = %+v, want none", snapshot.Routes[0].Replicas)
+	}
 	assertRouteRange(t, snapshot.Routes[0], nodeID, 0, controlapi.VSlotMax)
 }
 

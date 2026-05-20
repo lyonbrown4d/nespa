@@ -91,16 +91,16 @@ Nespa 第一阶段明确不做：
 - set、adjust、primitive 写入和 batch 写入已接入 quota admission，写前预估增长成本，不允许绕过 space/namespace quota；ExpectedVersion 未命中时不会提前触发 quota reject；
 - routed TCP client 会读取 control snapshot，按 vslot 直连 DataNode；batch set/get/delete/exists/touch/primitive 会按 route 分组，失败后刷新 snapshot 并只重试未完成组；
 - control 写路径默认通过 Dragonboat Raft proposal 驱动 FSM Apply，并使用 Dragonboat log/snapshot 做控制面恢复；`--control-snapshot-path` 只作为 JSON 导入/导出辅助；
-- control rebalance 除事件外已生成 migration plan，记录需要从 source node 迁移到 target node 的 namespace/space/vslot 范围；
+- control rebalance 除事件外已生成 migration plan，记录需要从 source node 迁移到 target node 的 namespace/space/vslot 范围；control snapshot 的 route 仍以 `node_id/addr` 表示 primary，同时携带 `replicas` 作为后续 DataNode async replication 的目标元数据；
 - DataNode 已具备节点级 range migration primitive：按 `namespace/space/vslot` 导出 snapshot、导入 snapshot、删除源 range，并通过 TCP binary protocol 暴露给内部迁移执行器；
-- control migration executor 默认启用，会通过 Dragonboat/FSM claim planned task，顺序执行 `export -> import -> delete`，并把 task/plan 标记为 `running/done/failed`；
+- control migration executor 默认启用，会通过 Dragonboat/FSM claim planned task，按可配置并发度执行 `export -> import -> delete`，并把 task/plan 标记为 `running/done/failed`；默认并发为 1，`--control-migration-max-parallel-tasks` 可提高并发，同一批任务会按 source/target node 冲突拆成多个 wave，避免同一 DataNode 被多个迁移任务同时读写；
 - DataNode memory engine 支持本地 snapshot/restore，并可通过 `--node-snapshot-path` 做进程重启恢复；同时支持 `--node-snapshot-interval` 周期持久化快照（0 禁用）；这是本地持久化基础，不等价于副本复制；
 - Go SDK 已放在 `sdk/go`，通过 go work 参与多子包开发；Java SDK 已放在 `sdk/java`，使用 Gradle Kotlin DSL、wrapper、version catalog、Lombok plugin、JPMS，并带 direct TCP/wire smoke 覆盖。
 
 尚未落地或仍是设计目标：
 
 - 3 节点控制面部署、membership change、跨节点 Raft 配置管理；
-- migration task 并发/重试/限流策略、复制、副本追赶和生产级 rebalance；
+- 数据复制、副本追赶和生产级 rebalance；
 - schema/query/index planner；
 - principal/grant 鉴权链路；
 - Java routed SDK、更多语言 SDK、生产级连接池和 TLS 策略。
@@ -1018,6 +1018,7 @@ primary -> replica async replication
 - primary ack 优先低延迟
 - replica 落后通过 replication offset 追赶
 - primary 故障后由控制面更新 route table
+- control snapshot route 使用 `node_id/addr` 表示 primary，`replicas` 表示同一 vslot 范围的异步复制目标；当前实现先落地 route replica 元数据，DataNode 写后复制协议和 offset catch-up 后续接入。
 
 不做：
 

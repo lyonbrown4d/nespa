@@ -105,44 +105,67 @@ func buildMigrationTasks(
 	previousRoutes []controlapi.RouteBody,
 	currentRoutes []controlapi.RouteBody,
 ) []controlapi.MigrationTaskBody {
-	tasks := make([]controlapi.MigrationTaskBody, 0)
+	tasks := make([]controlapi.MigrationTaskBody, 0, len(previousRoutes))
 	for currentIndex := range currentRoutes {
-		current := currentRoutes[currentIndex]
-		if current.Namespace == "" && current.Space == "" {
-			continue
-		}
-		for previousIndex := range previousRoutes {
-			previous := previousRoutes[previousIndex]
-			if previous.Namespace == "" && previous.Space == "" {
-				continue
-			}
-			if !sameRouteScope(previous, current) || previous.NodeID == current.NodeID {
-				continue
-			}
-			start, end, ok := routeOverlap(previous, current)
-			if !ok {
-				continue
-			}
-			tasks = append(tasks, controlapi.MigrationTaskBody{
-				Revision:      event.Revision,
-				Namespace:     current.Namespace,
-				Space:         current.Space,
-				VSlotStart:    start,
-				VSlotEnd:      end,
-				SourceNodeID:  previous.NodeID,
-				SourceAddr:    previous.Addr,
-				TargetNodeID:  current.NodeID,
-				TargetAddr:    current.Addr,
-				State:         "planned",
-				CreatedAtUnix: event.CreatedAtUnix,
-			})
-		}
+		tasks = append(tasks, migrationTasksForRoute(event, previousRoutes, currentRoutes[currentIndex])...)
 	}
 	return tasks
 }
 
+func migrationTasksForRoute(
+	event controlapi.RebalanceEventBody,
+	previousRoutes []controlapi.RouteBody,
+	current controlapi.RouteBody,
+) []controlapi.MigrationTaskBody {
+	if emptyRouteScope(current) {
+		return nil
+	}
+
+	tasks := make([]controlapi.MigrationTaskBody, 0)
+	for previousIndex := range previousRoutes {
+		previous := previousRoutes[previousIndex]
+		start, end, ok := migrationTaskRange(previous, current)
+		if !ok {
+			continue
+		}
+		tasks = append(tasks, migrationTaskForRoute(event, previous, current, start, end))
+	}
+	return tasks
+}
+
+func migrationTaskRange(previous, current controlapi.RouteBody) (uint32, uint32, bool) {
+	if emptyRouteScope(previous) || !sameRouteScope(previous, current) || previous.NodeID == current.NodeID {
+		return 0, 0, false
+	}
+	return routeOverlap(previous, current)
+}
+
+func migrationTaskForRoute(
+	event controlapi.RebalanceEventBody,
+	previous, current controlapi.RouteBody,
+	start, end uint32,
+) controlapi.MigrationTaskBody {
+	return controlapi.MigrationTaskBody{
+		Revision:      event.Revision,
+		Namespace:     current.Namespace,
+		Space:         current.Space,
+		VSlotStart:    start,
+		VSlotEnd:      end,
+		SourceNodeID:  previous.NodeID,
+		SourceAddr:    previous.Addr,
+		TargetNodeID:  current.NodeID,
+		TargetAddr:    current.Addr,
+		State:         "planned",
+		CreatedAtUnix: event.CreatedAtUnix,
+	}
+}
+
 func sameRouteScope(left, right controlapi.RouteBody) bool {
 	return left.Namespace == right.Namespace && left.Space == right.Space
+}
+
+func emptyRouteScope(route controlapi.RouteBody) bool {
+	return route.Namespace == "" && route.Space == ""
 }
 
 func routeOverlap(left, right controlapi.RouteBody) (uint32, uint32, bool) {

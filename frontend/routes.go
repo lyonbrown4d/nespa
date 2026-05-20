@@ -8,14 +8,21 @@ import (
 )
 
 type Route struct {
-	Namespace  string `json:"namespace,omitempty"`
-	Space      string `json:"space,omitempty"`
-	VSlotStart uint32 `json:"vslot_start"`
-	VSlotEnd   uint32 `json:"vslot_end"`
-	Role       string `json:"role"`
-	NodeID     string `json:"node_id,omitempty"`
-	Addr       string `json:"addr"`
-	Weight     uint32 `json:"weight,omitempty"`
+	Namespace  string         `json:"namespace,omitempty"`
+	Space      string         `json:"space,omitempty"`
+	VSlotStart uint32         `json:"vslot_start"`
+	VSlotEnd   uint32         `json:"vslot_end"`
+	Role       string         `json:"role"`
+	NodeID     string         `json:"node_id,omitempty"`
+	Addr       string         `json:"addr"`
+	Weight     uint32         `json:"weight,omitempty"`
+	Replicas   []RouteReplica `json:"replicas,omitempty"`
+}
+
+type RouteReplica struct {
+	NodeID string `json:"node_id"`
+	Addr   string `json:"addr"`
+	Weight uint32 `json:"weight,omitempty"`
 }
 
 type RoutesBody struct {
@@ -57,6 +64,7 @@ func (c *RouteCache) UpdateFromSnapshot(snapshot controlapi.SnapshotBody, source
 			NodeID:     route.NodeID,
 			Addr:       route.Addr,
 			Weight:     route.Weight,
+			Replicas:   routeReplicasFromControl(route.Replicas),
 		})
 	}
 
@@ -159,6 +167,33 @@ func firstRoute(routes ...*Route) (Route, bool) {
 func cloneRoutes(routes []Route) []Route {
 	out := make([]Route, len(routes))
 	copy(out, routes)
+	for index := range out {
+		out[index].Replicas = cloneRouteReplicas(out[index].Replicas)
+	}
+	return out
+}
+
+func routeReplicasFromControl(replicas []controlapi.RouteReplicaBody) []RouteReplica {
+	if len(replicas) == 0 {
+		return nil
+	}
+	out := make([]RouteReplica, 0, len(replicas))
+	for index := range replicas {
+		out = append(out, RouteReplica{
+			NodeID: replicas[index].NodeID,
+			Addr:   replicas[index].Addr,
+			Weight: replicas[index].Weight,
+		})
+	}
+	return out
+}
+
+func cloneRouteReplicas(replicas []RouteReplica) []RouteReplica {
+	if len(replicas) == 0 {
+		return nil
+	}
+	out := make([]RouteReplica, len(replicas))
+	copy(out, replicas)
 	return out
 }
 

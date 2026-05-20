@@ -80,15 +80,15 @@ func TestClientServerFenceRangeBlocksMutationAndAllowsReads(t *testing.T) {
 	requireWireErrorCode(t, err, protocol.ErrorNoRoute)
 
 	outKey := keyOutsideRangeForSlot(t, "orders", "session", rangeRequest.VSlotStart, rangeRequest.VSlotEnd)
-	if _, err := client.Set(t.Context(), server.Addr(), cachewire.SetRequest{
+	if _, setErr := client.Set(t.Context(), server.Addr(), cachewire.SetRequest{
 		Key:   outKey,
 		Value: []byte("untouched"),
-	}); err != nil {
-		t.Fatalf("set out-of-range key: %v", err)
+	}); setErr != nil {
+		t.Fatalf("set out-of-range key: %v", setErr)
 	}
 
-	if _, err := client.UnfenceRange(t.Context(), server.Addr(), rangeRequest); err != nil {
-		t.Fatalf("unfence range: %v", err)
+	if _, unfenceErr := client.UnfenceRange(t.Context(), server.Addr(), rangeRequest); unfenceErr != nil {
+		t.Fatalf("unfence range: %v", unfenceErr)
 	}
 	_, err = client.Set(t.Context(), server.Addr(), cachewire.SetRequest{
 		Key:   key,

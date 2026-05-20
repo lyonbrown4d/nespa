@@ -12,6 +12,14 @@ import (
 	"github.com/spf13/pflag"
 )
 
+type taskCountConfig struct {
+	Tasks int `mapstructure:"tasks"`
+}
+
+type maxConfig struct {
+	Parallel taskCountConfig `mapstructure:"parallel"`
+}
+
 func addServerFlags(flags *pflag.FlagSet) {
 	flags.Bool("control-enabled", true, "enable control-plane HTTP service")
 	flags.String("control-addr", "127.0.0.1:7401", "control-plane HTTP listen address")
@@ -29,6 +37,7 @@ func addServerFlags(flags *pflag.FlagSet) {
 	flags.Duration("control-migration-sweep-interval", time.Second, "control-plane migration executor sweep interval")
 	flags.Duration("control-migration-task-timeout", 10*time.Second, "control-plane migration task timeout")
 	flags.Duration("control-migration-retry-interval", 2*time.Second, "control-plane migration retry interval")
+	flags.Int("control-migration-max-parallel-tasks", 1, "maximum control-plane migration tasks to execute concurrently")
 	flags.Bool("frontend-enabled", false, "enable optional frontend webui/debug module")
 	flags.String("frontend-addr", "127.0.0.1:7402", "frontend HTTP listen address")
 	flags.Bool("node-enabled", true, "enable data-node TCP service")
@@ -62,34 +71,35 @@ func configModule(flags *pflag.FlagSet) dix.Module {
 
 func serverDefaults() map[string]any {
 	return map[string]any{
-		"control.enabled":                   true,
-		"control.addr":                      "127.0.0.1:7401",
-		"control.cluster.id":                "local",
-		"control.snapshot.path":             "",
-		"control.raft.dir":                  "",
-		"control.raft.addr":                 "127.0.0.1:7601",
-		"control.raft.cluster.id":           uint64(1),
-		"control.raft.node.id":              uint64(1),
-		"control.raft.proposal.timeout":     5 * time.Second,
-		"control.liveness.sweep.interval":   5 * time.Second,
-		"control.liveness.suspect.after":    15 * time.Second,
-		"control.liveness.dead.after":       30 * time.Second,
-		"control.migration.enabled":         true,
-		"control.migration.sweep.interval":  time.Second,
-		"control.migration.task.timeout":    10 * time.Second,
-		"control.migration.retry.interval":  2 * time.Second,
-		"frontend.enabled":                  false,
-		"frontend.addr":                     "127.0.0.1:7402",
-		"node.enabled":                      true,
-		"node.addr":                         "127.0.0.1:7403",
-		"node.id":                           "node-1",
-		"node.heartbeat.interval":           5 * time.Second,
-		"node.snapshot.path":                "",
-		"node.snapshot.interval":            0,
-		"admin.enabled":                     true,
-		"admin.addr":                        "127.0.0.1:7404",
-		"node.quota.namespace.memory.bytes": uint64(0),
-		"node.quota.space.memory.bytes":     uint64(0),
+		"control.enabled":                      true,
+		"control.addr":                         "127.0.0.1:7401",
+		"control.cluster.id":                   "local",
+		"control.snapshot.path":                "",
+		"control.raft.dir":                     "",
+		"control.raft.addr":                    "127.0.0.1:7601",
+		"control.raft.cluster.id":              uint64(1),
+		"control.raft.node.id":                 uint64(1),
+		"control.raft.proposal.timeout":        5 * time.Second,
+		"control.liveness.sweep.interval":      5 * time.Second,
+		"control.liveness.suspect.after":       15 * time.Second,
+		"control.liveness.dead.after":          30 * time.Second,
+		"control.migration.enabled":            true,
+		"control.migration.sweep.interval":     time.Second,
+		"control.migration.task.timeout":       10 * time.Second,
+		"control.migration.retry.interval":     2 * time.Second,
+		"control.migration.max.parallel.tasks": 1,
+		"frontend.enabled":                     false,
+		"frontend.addr":                        "127.0.0.1:7402",
+		"node.enabled":                         true,
+		"node.addr":                            "127.0.0.1:7403",
+		"node.id":                              "node-1",
+		"node.heartbeat.interval":              5 * time.Second,
+		"node.snapshot.path":                   "",
+		"node.snapshot.interval":               0,
+		"admin.enabled":                        true,
+		"admin.addr":                           "127.0.0.1:7404",
+		"node.quota.namespace.memory.bytes":    uint64(0),
+		"node.quota.space.memory.bytes":        uint64(0),
 	}
 }
 
@@ -111,10 +121,11 @@ func controlConfigFrom(cfg serverConfig) control.Config {
 			DeadAfter:     cfg.Control.Liveness.Dead.After,
 		},
 		Migration: control.MigrationConfig{
-			Enabled:       cfg.Control.Migration.Enabled,
-			SweepInterval: cfg.Control.Migration.Sweep.Interval,
-			TaskTimeout:   cfg.Control.Migration.Task.Timeout,
-			RetryBackoff:  cfg.Control.Migration.Retry.Interval,
+			Enabled:          cfg.Control.Migration.Enabled,
+			SweepInterval:    cfg.Control.Migration.Sweep.Interval,
+			TaskTimeout:      cfg.Control.Migration.Task.Timeout,
+			RetryBackoff:     cfg.Control.Migration.Retry.Interval,
+			MaxParallelTasks: cfg.Control.Migration.Max.Parallel.Tasks,
 		},
 		Persistence: control.PersistenceConfig{
 			SnapshotPath: cfg.Control.Snapshot.Path,

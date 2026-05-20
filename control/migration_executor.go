@@ -16,13 +16,15 @@ const (
 	defaultMigrationSweepInterval = time.Second
 	defaultMigrationTaskTimeout   = 10 * time.Second
 	defaultMigrationRetryBackoff  = 2 * time.Second
+	defaultMigrationMaxParallel   = 1
 )
 
 type MigrationConfig struct {
-	Enabled       bool
-	SweepInterval time.Duration
-	TaskTimeout   time.Duration
-	RetryBackoff  time.Duration
+	Enabled          bool
+	SweepInterval    time.Duration
+	TaskTimeout      time.Duration
+	RetryBackoff     time.Duration
+	MaxParallelTasks int
 }
 
 type migrationRangeClient interface {
@@ -51,6 +53,9 @@ func normalizeMigrationConfig(cfg MigrationConfig) MigrationConfig {
 	}
 	if cfg.RetryBackoff <= 0 {
 		cfg.RetryBackoff = defaultMigrationRetryBackoff
+	}
+	if cfg.MaxParallelTasks <= 0 {
+		cfg.MaxParallelTasks = defaultMigrationMaxParallel
 	}
 	return cfg
 }
@@ -83,17 +88,16 @@ func executePendingMigrationTasks(
 	cfg MigrationConfig,
 	client migrationRangeClient,
 ) {
-	reapTimedOutMigrationTasks(ctx, logger, svc, cfg, time.Now())
+	reapTimedOutMigrationTasks(ctx, logger, svc, cfg, svc.nowTime())
 	for {
-		result, err := svc.claimMigrationTask(ctx)
-		if err != nil {
-			logger.Warn("control migration task claim failed", "error", err)
+		tasks, keepClaiming := claimMigrationTaskBatch(ctx, logger, svc, cfg)
+		if len(tasks) == 0 {
 			return
 		}
-		if !result.Claimed {
+		executeClaimedMigrationTaskBatch(ctx, logger, svc, cfg, client, tasks)
+		if !keepClaiming || len(tasks) < migrationTaskConcurrency(cfg) {
 			return
 		}
-		executeClaimedMigrationTask(ctx, logger, svc, cfg, client, result.Task)
 	}
 }
 
@@ -105,12 +109,13 @@ func reapTimedOutMigrationTasks(
 	now time.Time,
 ) {
 	staleTasks := svc.timedOutMigrationTasks(now, cfg.TaskTimeout)
-	for _, task := range staleTasks {
+	for index := range staleTasks {
+		task := staleTasks[index]
 		err := svc.failMigrationTask(
 			ctx,
 			task,
 			retryDelay(task, cfg),
-			fmt.Errorf("migration task timed out"),
+			errors.New("migration task timed out"),
 		)
 		if err != nil {
 			logger.Warn(
@@ -163,22 +168,19 @@ func migrateRange(
 
 	request := migrationRangeRequest(task)
 	if task.CutoverAtUnix > 0 {
-		deleted, deleteErr := deleteMigrationSource(taskCtx, client, task, request)
-		unfenceErr := unfenceMigrationSource(taskCtx, client, task, request)
-		if deleteErr != nil && unfenceErr != nil {
-			return task.ImportedEntries, deleted, errors.Join(
-				fmt.Errorf("delete source migration range: %w", deleteErr),
-				fmt.Errorf("unfence migration source: %w", unfenceErr),
-			)
-		}
-		if deleteErr != nil {
-			return task.ImportedEntries, deleted, fmt.Errorf("delete source migration range: %w", deleteErr)
-		}
-		if unfenceErr != nil {
-			return task.ImportedEntries, deleted, fmt.Errorf("unfence migration source: %w", unfenceErr)
-		}
-		return task.ImportedEntries, deleted, nil
+		return cleanupMigratedRange(taskCtx, client, task, request)
 	}
+	return migrateRangeToTarget(ctx, taskCtx, svc, client, task, request)
+}
+
+func migrateRangeToTarget(
+	ctx context.Context,
+	taskCtx context.Context,
+	svc *ServiceRuntime,
+	client migrationRangeClient,
+	task controlapi.MigrationTaskBody,
+	request cachewire.MigrationRangeRequest,
+) (uint64, uint64, error) {
 	if _, err := client.FenceRange(taskCtx, task.SourceAddr, request); err != nil {
 		return 0, 0, fmt.Errorf("fence migration range: %w", err)
 	}
@@ -191,8 +193,8 @@ func migrateRange(
 	if err != nil {
 		return 0, 0, fmt.Errorf("import migration snapshot: %w", err)
 	}
-	if err := svc.cutoverMigrationTask(ctx, task, imported.Imported); err != nil {
-		return imported.Imported, 0, fmt.Errorf("cutover migration task: %w", err)
+	if cutoverErr := svc.cutoverMigrationTask(ctx, task, imported.Imported); cutoverErr != nil {
+		return imported.Imported, 0, fmt.Errorf("cutover migration task: %w", cutoverErr)
 	}
 	deleted, err := deleteMigrationSource(taskCtx, client, task, request)
 	if err != nil {
@@ -202,6 +204,33 @@ func migrateRange(
 		return imported.Imported, deleted, fmt.Errorf("unfence migration range: %w", err)
 	}
 	return imported.Imported, deleted, nil
+}
+
+func cleanupMigratedRange(
+	ctx context.Context,
+	client migrationRangeClient,
+	task controlapi.MigrationTaskBody,
+	request cachewire.MigrationRangeRequest,
+) (uint64, uint64, error) {
+	deleted, deleteErr := deleteMigrationSource(ctx, client, task, request)
+	unfenceErr := unfenceMigrationSource(ctx, client, task, request)
+	return migrationCleanupResult(task.ImportedEntries, deleted, deleteErr, unfenceErr)
+}
+
+func migrationCleanupResult(imported, deleted uint64, deleteErr, unfenceErr error) (uint64, uint64, error) {
+	if deleteErr != nil && unfenceErr != nil {
+		return imported, deleted, errors.Join(
+			fmt.Errorf("delete source migration range: %w", deleteErr),
+			fmt.Errorf("unfence migration source: %w", unfenceErr),
+		)
+	}
+	if deleteErr != nil {
+		return imported, deleted, fmt.Errorf("delete source migration range: %w", deleteErr)
+	}
+	if unfenceErr != nil {
+		return imported, deleted, fmt.Errorf("unfence migration source: %w", unfenceErr)
+	}
+	return imported, deleted, nil
 }
 
 func deleteMigrationSource(
@@ -226,7 +255,10 @@ func unfenceMigrationSource(
 	unfenceCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultMigrationTaskTimeout)
 	defer cancel()
 	_, err := client.UnfenceRange(unfenceCtx, task.SourceAddr, request)
-	return err
+	if err != nil {
+		return fmt.Errorf("unfence migration source: %w", err)
+	}
+	return nil
 }
 
 func retryDelay(task controlapi.MigrationTaskBody, cfg MigrationConfig) time.Duration {

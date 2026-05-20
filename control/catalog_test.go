@@ -191,7 +191,9 @@ func TestControlStateSnapshotBuildsSpaceScopedRoutes(t *testing.T) {
 		t.Fatalf("routes len = %d, want 2: %+v", len(snapshot.Routes), snapshot.Routes)
 	}
 	assertSpaceRoute(t, snapshot.Routes[0], "orders", "session", "node-1", 0, 32767)
+	assertRouteReplicas(t, snapshot.Routes[0], "node-2")
 	assertSpaceRoute(t, snapshot.Routes[1], "orders", "session", "node-2", 32768, controlapi.VSlotMax)
+	assertRouteReplicas(t, snapshot.Routes[1], "node-1")
 }
 
 func TestControlStateRecordsSpaceRouteEvent(t *testing.T) {
@@ -271,4 +273,16 @@ func assertSpaceRoute(t *testing.T, route controlapi.RouteBody, namespace, space
 		t.Fatalf("route scope = %s/%s, want %s/%s", route.Namespace, route.Space, namespace, space)
 	}
 	assertRouteRange(t, route, nodeID, start, end)
+}
+
+func assertRouteReplicas(t *testing.T, route controlapi.RouteBody, wantNodeIDs ...string) {
+	t.Helper()
+	if len(route.Replicas) != len(wantNodeIDs) {
+		t.Fatalf("route replicas = %+v, want nodes %v", route.Replicas, wantNodeIDs)
+	}
+	for index := range wantNodeIDs {
+		if route.Replicas[index].NodeID != wantNodeIDs[index] {
+			t.Fatalf("route replica %d = %+v, want node %s", index, route.Replicas[index], wantNodeIDs[index])
+		}
+	}
 }

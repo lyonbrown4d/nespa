@@ -134,111 +134,21 @@ func TestControlStateDeadNodeMigrationTaskRetryThenCompletes(t *testing.T) {
 	registerNode(t, state)
 	createOrdersSession(t, state)
 	registerSpecificNode(t, state, "node-2", "127.0.0.1:7503")
-
-	joinTask := state.ClaimMigrationTask(now)
-	if !joinTask.Claimed {
-		t.Fatalf("expected join task claim before dead-path test")
-	}
-	if _, err := state.CutoverMigrationTask(joinTask.Task.PlanID, joinTask.Task.TaskID, 0, now); err != nil {
-		t.Fatalf("cutover join task: %v", err)
-	}
-	if _, err := state.CompleteMigrationTask(joinTask.Task.PlanID, joinTask.Task.TaskID, 0, 0, now); err != nil {
-		t.Fatalf("complete join task: %v", err)
-	}
-
-	now = time.Unix(40, 0)
-	if _, err := state.Heartbeat(t.Context(), "node-1", "127.0.0.1:7403"); err != nil {
-		t.Fatalf("heartbeat node-1: %v", err)
-	}
+	completeInitialJoinMigration(t, state, now)
 
 	deadTime := time.Unix(45, 0)
+	now = time.Unix(40, 0)
+	heartbeatNode1(t, state)
 	now = deadTime
 	state.AdvanceLiveness(t.Context(), deadTime, 0, 10*time.Second)
 
-	plans := state.MigrationPlans().Plans
-	if len(plans) < 2 {
-		t.Fatalf("migration plans = %+v, want dead node replanning plan", plans)
-	}
-	var deadPlan controlapi.MigrationPlanBody
-	found := false
-	for index := len(plans) - 1; index >= 0; index-- {
-		if plans[index].Reason == "node_dead" {
-			deadPlan = plans[index]
-			found = true
-			break
-		}
-	}
-	if !found || len(deadPlan.Tasks) != 1 {
-		t.Fatalf("dead migration plan = %+v, want one task", deadPlan)
-	}
-	deadTask := deadPlan.Tasks[0]
-	if deadTask.SourceNodeID != "node-2" || deadTask.TargetNodeID != "node-1" {
-		t.Fatalf("dead task nodes = %+v, want node-2 -> node-1", deadTask)
-	}
-
-	snapshot := state.Snapshot()
+	deadTask := requireLatestDeadNodeMigrationTask(t, state)
 	key := keyInTaskRange(t, deadTask)
-	before, ok := routing.Select(snapshot.Routes, key.Namespace, key.Space, key.Key)
-	if !ok {
-		t.Fatalf("route before cutover = %+v, want hit", before)
-	}
-	if before.NodeID != "node-2" {
-		t.Fatalf("route before cutover = %+v, want node-2", before)
-	}
+	requireRouteNode(t, state.Snapshot().Routes, key, "node-2", "before cutover")
 
-	claimed := state.ClaimMigrationTask(deadTime)
-	if !claimed.Claimed {
-		t.Fatalf("expected claim dead task")
-	}
-	claimedTask := claimed.Task
-
-	failed, err := state.FailMigrationTask(
-		claimedTask.PlanID,
-		claimedTask.TaskID,
-		"temporary network",
-		2*time.Second,
-		deadTime,
-	)
-	if err != nil {
-		t.Fatalf("fail dead task: %v", err)
-	}
-	if failed.Attempts != 1 || failed.State != "failed" {
-		t.Fatalf("failed task = %+v, want attempts=1 failed", failed)
-	}
-
-	retryable := state.ClaimMigrationTask(deadTime.Add(time.Second))
-	if retryable.Claimed {
-		t.Fatalf("expected no claim before retry, got %+v", retryable)
-	}
-	retryable = state.ClaimMigrationTask(deadTime.Add(3 * time.Second))
-	if !retryable.Claimed {
-		t.Fatalf("expected claim after retry, got %+v", retryable)
-	}
-
-	retried := retryable.Task
-	if retried.State != "running" {
-		t.Fatalf("retried task state = %s, want running", retried.State)
-	}
-	if _, err := state.CutoverMigrationTask(retried.PlanID, retried.TaskID, 100, deadTime.Add(3*time.Second)); err != nil {
-		t.Fatalf("cutover dead task: %v", err)
-	}
-	if _, err := state.CompleteMigrationTask(
-		retried.PlanID,
-		retried.TaskID,
-		100,
-		100,
-		deadTime.Add(3*time.Second),
-	); err != nil {
-		t.Fatalf("complete dead task: %v", err)
-	}
-
-	after, ok := routing.Select(state.Snapshot().Routes, key.Namespace, key.Space, key.Key)
-	if !ok {
-		t.Fatalf("route after complete = %+v, want hit", after)
-	}
-	if after.NodeID != "node-1" {
-		t.Fatalf("route after complete = %+v, want node-1", after)
-	}
+	retried := failAndRetryDeadMigrationTask(t, state, deadTime)
+	completeDeadMigrationTask(t, state, retried, deadTime.Add(3*time.Second))
+	requireRouteNode(t, state.Snapshot().Routes, key, "node-1", "after complete")
 }
 
 func assertMigrationTask(t *testing.T, task controlapi.MigrationTaskBody) {

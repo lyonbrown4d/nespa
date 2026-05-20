@@ -1,6 +1,9 @@
 package tcp
 
 import (
+	"fmt"
+	"slices"
+
 	"github.com/lyonbrown4d/nespa/cachewire"
 	"github.com/lyonbrown4d/nespa/protocol"
 )
@@ -8,7 +11,7 @@ import (
 func keysFromPrimitiveFrame(frame protocol.Frame) ([]cachewire.Key, error) {
 	request, err := cachewire.DecodePrimitiveRequest(frame.Metadata, frame.Payload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode primitive mutation keys: %w", err)
 	}
 	if !primitiveWireKindMutates(request.Kind) {
 		return nil, nil
@@ -19,7 +22,7 @@ func keysFromPrimitiveFrame(frame protocol.Frame) ([]cachewire.Key, error) {
 func keysFromBatchSetFrame(frame protocol.Frame) ([]cachewire.Key, error) {
 	request, err := cachewire.DecodeBatchSetRequest(frame.Metadata, frame.Payload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode batch set mutation keys: %w", err)
 	}
 	keys := make([]cachewire.Key, 0, len(request.Items))
 	for index := range request.Items {
@@ -31,7 +34,7 @@ func keysFromBatchSetFrame(frame protocol.Frame) ([]cachewire.Key, error) {
 func keysFromBatchDeleteFrame(frame protocol.Frame) ([]cachewire.Key, error) {
 	request, err := cachewire.DecodeBatchDeleteRequest(frame.Metadata)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode batch delete mutation keys: %w", err)
 	}
 	keys := make([]cachewire.Key, 0, len(request.Items))
 	for index := range request.Items {
@@ -43,7 +46,7 @@ func keysFromBatchDeleteFrame(frame protocol.Frame) ([]cachewire.Key, error) {
 func keysFromBatchTouchFrame(frame protocol.Frame) ([]cachewire.Key, error) {
 	request, err := cachewire.DecodeBatchTouchRequest(frame.Metadata)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode batch touch mutation keys: %w", err)
 	}
 	keys := make([]cachewire.Key, 0, len(request.Items))
 	for index := range request.Items {
@@ -55,7 +58,7 @@ func keysFromBatchTouchFrame(frame protocol.Frame) ([]cachewire.Key, error) {
 func keysFromBatchPrimitiveFrame(frame protocol.Frame) ([]cachewire.Key, error) {
 	request, err := cachewire.DecodeBatchPrimitiveRequest(frame.Metadata, frame.Payload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode batch primitive mutation keys: %w", err)
 	}
 	keys := make([]cachewire.Key, 0, len(request.Items))
 	for index := range request.Items {
@@ -68,19 +71,19 @@ func keysFromBatchPrimitiveFrame(frame protocol.Frame) ([]cachewire.Key, error) 
 }
 
 func primitiveWireKindMutates(kind cachewire.PrimitiveKind) bool {
-	switch kind {
-	case cachewire.PrimitiveCounterAdjust,
-		cachewire.PrimitiveMapSet,
-		cachewire.PrimitiveMapDelete,
-		cachewire.PrimitiveSetAdd,
-		cachewire.PrimitiveSetRemove,
-		cachewire.PrimitiveScoredSetPut,
-		cachewire.PrimitiveScoredSetRemove,
-		cachewire.PrimitiveListPushFront,
-		cachewire.PrimitiveListPushBack,
-		cachewire.PrimitiveListPopFront,
-		cachewire.PrimitiveListPopBack:
-		return true
-	}
-	return false
+	return slices.Contains(mutatingPrimitiveKinds, kind)
+}
+
+var mutatingPrimitiveKinds = []cachewire.PrimitiveKind{
+	cachewire.PrimitiveCounterAdjust,
+	cachewire.PrimitiveMapSet,
+	cachewire.PrimitiveMapDelete,
+	cachewire.PrimitiveSetAdd,
+	cachewire.PrimitiveSetRemove,
+	cachewire.PrimitiveScoredSetPut,
+	cachewire.PrimitiveScoredSetRemove,
+	cachewire.PrimitiveListPushFront,
+	cachewire.PrimitiveListPushBack,
+	cachewire.PrimitiveListPopFront,
+	cachewire.PrimitiveListPopBack,
 }

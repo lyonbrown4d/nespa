@@ -59,10 +59,7 @@ func TestRunSnapshotScheduler(t *testing.T) {
 	}()
 
 	deadline := time.Now().Add(250 * time.Millisecond)
-	for {
-		if count.Load() >= 2 {
-			break
-		}
+	for count.Load() < 2 {
 		if time.Now().After(deadline) {
 			t.Fatalf("snapshot scheduler did not trigger enough saves: got %d", count.Load())
 		}

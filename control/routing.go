@@ -6,6 +6,8 @@ import (
 	"github.com/lyonbrown4d/nespa/controlapi"
 )
 
+const defaultRouteReplicaCount = 1
+
 func (s *ControlState) sortedNodesLocked() []controlapi.NodeBody {
 	nodes := s.nodes.Values()
 	sort.Slice(nodes, func(i, j int) bool {
@@ -42,9 +44,38 @@ func routesForSpace(healthy []controlapi.NodeBody, space controlapi.SpaceBody) [
 			NodeID:     node.NodeID,
 			Addr:       node.Addr,
 			Weight:     1,
+			Replicas:   routeReplicas(healthy, index, defaultRouteReplicaCount),
 		})
 	}
 	return routes
+}
+
+func routeReplicas(nodes []controlapi.NodeBody, primaryIndex, replicaCount int) []controlapi.RouteReplicaBody {
+	limit := routeReplicaLimit(len(nodes), replicaCount)
+	if limit == 0 {
+		return nil
+	}
+
+	replicas := make([]controlapi.RouteReplicaBody, 0, limit)
+	for offset := 1; offset <= limit; offset++ {
+		node := nodes[(primaryIndex+offset)%len(nodes)]
+		replicas = append(replicas, controlapi.RouteReplicaBody{
+			NodeID: node.NodeID,
+			Addr:   node.Addr,
+			Weight: 1,
+		})
+	}
+	return replicas
+}
+
+func routeReplicaLimit(nodeCount, replicaCount int) int {
+	if nodeCount <= 1 || replicaCount <= 0 {
+		return 0
+	}
+	if replicaCount >= nodeCount {
+		return nodeCount - 1
+	}
+	return replicaCount
 }
 
 func healthyNodes(nodes []controlapi.NodeBody) []controlapi.NodeBody {

@@ -1,6 +1,8 @@
 package tcp
 
 import (
+	"slices"
+
 	"github.com/lyonbrown4d/nespa/cachewire"
 	"github.com/lyonbrown4d/nespa/protocol"
 )
@@ -13,52 +15,55 @@ func (s *Server) fencedMutation(frame protocol.Frame) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for index := range keys {
-		if s.fences.containsKey(keys[index]) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return slices.ContainsFunc(keys, s.fences.containsKey), nil
+}
+
+var mutatingCacheOps = []protocol.Op{
+	protocol.OpCacheSet,
+	protocol.OpCacheDelete,
+	protocol.OpCacheTouch,
+	protocol.OpCacheAdjust,
+	protocol.OpCachePrimitive,
+	protocol.OpCacheBatchSet,
+	protocol.OpCacheBatchDelete,
+	protocol.OpCacheBatchTouch,
+	protocol.OpCacheBatchPrimitive,
 }
 
 func cacheOpCanMutate(op protocol.Op) bool {
-	switch op {
-	case protocol.OpCacheSet,
-		protocol.OpCacheDelete,
-		protocol.OpCacheTouch,
-		protocol.OpCacheAdjust,
-		protocol.OpCachePrimitive,
-		protocol.OpCacheBatchSet,
-		protocol.OpCacheBatchDelete,
-		protocol.OpCacheBatchTouch,
-		protocol.OpCacheBatchPrimitive:
-		return true
-	}
-	return false
+	return slices.Contains(mutatingCacheOps, op)
+}
+
+var mutationKeyDecoders = map[protocol.Op]func(protocol.Frame) ([]cachewire.Key, error){
+	protocol.OpCacheGet:            nil,
+	protocol.OpCacheSet:            keyFromSetFrame,
+	protocol.OpCacheDelete:         keyFromDeleteFrame,
+	protocol.OpCacheBatchGet:       nil,
+	protocol.OpNodeHeartbeat:       nil,
+	protocol.OpControlSnapshot:     nil,
+	protocol.OpControlWatch:        nil,
+	protocol.OpCacheExists:         nil,
+	protocol.OpCacheTouch:          keyFromTouchFrame,
+	protocol.OpCacheAdjust:         keyFromAdjustFrame,
+	protocol.OpCachePrimitive:      keysFromPrimitiveFrame,
+	protocol.OpCacheBatchSet:       keysFromBatchSetFrame,
+	protocol.OpCacheBatchDelete:    keysFromBatchDeleteFrame,
+	protocol.OpCacheBatchExists:    nil,
+	protocol.OpCacheBatchTouch:     keysFromBatchTouchFrame,
+	protocol.OpCacheBatchPrimitive: keysFromBatchPrimitiveFrame,
+	protocol.OpNodeExportRange:     nil,
+	protocol.OpNodeImportSnapshot:  nil,
+	protocol.OpNodeDeleteRange:     nil,
+	protocol.OpNodeFenceRange:      nil,
+	protocol.OpNodeUnfenceRange:    nil,
 }
 
 func mutationKeys(frame protocol.Frame) ([]cachewire.Key, error) {
-	switch frame.Op {
-	case protocol.OpCacheSet:
-		return keyFromSetFrame(frame)
-	case protocol.OpCacheDelete:
-		return keyFromDeleteFrame(frame)
-	case protocol.OpCacheTouch:
-		return keyFromTouchFrame(frame)
-	case protocol.OpCacheAdjust:
-		return keyFromAdjustFrame(frame)
-	case protocol.OpCachePrimitive:
-		return keysFromPrimitiveFrame(frame)
-	case protocol.OpCacheBatchSet:
-		return keysFromBatchSetFrame(frame)
-	case protocol.OpCacheBatchDelete:
-		return keysFromBatchDeleteFrame(frame)
-	case protocol.OpCacheBatchTouch:
-		return keysFromBatchTouchFrame(frame)
-	case protocol.OpCacheBatchPrimitive:
-		return keysFromBatchPrimitiveFrame(frame)
+	decode, ok := mutationKeyDecoders[frame.Op]
+	if !ok || decode == nil {
+		return nil, nil
 	}
-	return nil, nil
+	return decode(frame)
 }
 
 func keyFromSetFrame(frame protocol.Frame) ([]cachewire.Key, error) {

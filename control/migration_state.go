@@ -152,15 +152,6 @@ func (s *ControlState) replacePlansLocked(plans []controlapi.MigrationPlanBody) 
 	s.plans = collectionlist.NewList[controlapi.MigrationPlanBody](plans...)
 }
 
-func firstTaskWithState(plan controlapi.MigrationPlanBody, state string) (int, bool) {
-	for index := range plan.Tasks {
-		if plan.Tasks[index].State == state {
-			return index, true
-		}
-	}
-	return 0, false
-}
-
 func firstClaimableTask(plan controlapi.MigrationPlanBody, now time.Time) (int, bool) {
 	for index := range plan.Tasks {
 		if claimableMigrationTask(plan.Tasks[index], now) {

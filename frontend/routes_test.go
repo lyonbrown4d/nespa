@@ -36,7 +36,16 @@ func TestRouteCacheUpdateFromSnapshot(t *testing.T) {
 	updated := cache.UpdateFromSnapshot(controlapi.SnapshotBody{
 		Revision: 7,
 		Routes: []controlapi.RouteBody{
-			{VSlotStart: 10, VSlotEnd: 20, NodeID: "node-1", Addr: "127.0.0.1:7403", Weight: 1},
+			{
+				VSlotStart: 10,
+				VSlotEnd:   20,
+				NodeID:     "node-1",
+				Addr:       "127.0.0.1:7403",
+				Weight:     1,
+				Replicas: []controlapi.RouteReplicaBody{
+					{NodeID: "node-2", Addr: "127.0.0.1:7503", Weight: 1},
+				},
+			},
 		},
 	}, "control")
 	if !updated {
@@ -52,6 +61,9 @@ func TestRouteCacheUpdateFromSnapshot(t *testing.T) {
 	}
 	if snapshot.Routes[0].VSlotStart != 10 || snapshot.Routes[0].VSlotEnd != 20 {
 		t.Fatalf("unexpected route vslot range: %+v", snapshot.Routes[0])
+	}
+	if len(snapshot.Routes[0].Replicas) != 1 || snapshot.Routes[0].Replicas[0].NodeID != "node-2" {
+		t.Fatalf("unexpected route replicas: %+v", snapshot.Routes[0].Replicas)
 	}
 }
 

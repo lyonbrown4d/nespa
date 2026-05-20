@@ -136,6 +136,7 @@ type controlMigrationConfig struct {
 	Sweep   intervalConfig `mapstructure:"sweep"`
 	Task    timeoutConfig  `mapstructure:"task"`
 	Retry   intervalConfig `mapstructure:"retry"`
+	Max     maxConfig      `mapstructure:"max"`
 }
 
 type controlRaftConfig struct {
