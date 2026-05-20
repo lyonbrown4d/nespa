@@ -17,6 +17,7 @@ type Config struct {
 	NodeID                      string
 	HeartbeatInterval           time.Duration
 	SnapshotPath                string
+	SnapshotInterval            time.Duration
 	DefaultNamespaceMemoryBytes uint64
 	DefaultSpaceMemoryBytes     uint64
 }

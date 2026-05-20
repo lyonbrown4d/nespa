@@ -36,6 +36,7 @@ func addServerFlags(flags *pflag.FlagSet) {
 	flags.String("node-id", "node-1", "data-node identifier")
 	flags.Duration("node-heartbeat-interval", 5*time.Second, "data-node control-plane heartbeat interval")
 	flags.String("node-snapshot-path", "", "data-node engine snapshot file path; empty disables file snapshot restore/save")
+	flags.Duration("node-snapshot-interval", 0, "data-node engine snapshot save interval; 0 disables periodic snapshot")
 	flags.Bool("admin-enabled", true, "enable admin API module")
 	flags.String("admin-addr", "127.0.0.1:7404", "admin HTTP listen address")
 	flags.Uint64("node-quota-namespace-memory-bytes", 0, "default namespace memory quota for the data node; 0 disables the limit")
@@ -84,6 +85,7 @@ func serverDefaults() map[string]any {
 		"node.id":                           "node-1",
 		"node.heartbeat.interval":           5 * time.Second,
 		"node.snapshot.path":                "",
+		"node.snapshot.interval":            0,
 		"admin.enabled":                     true,
 		"admin.addr":                        "127.0.0.1:7404",
 		"node.quota.namespace.memory.bytes": uint64(0),
@@ -141,6 +143,7 @@ func nodeConfigFrom(cfg serverConfig) node.Config {
 		NodeID:                      cfg.Node.ID,
 		HeartbeatInterval:           cfg.Node.Heartbeat.Interval,
 		SnapshotPath:                cfg.Node.Snapshot.Path,
+		SnapshotInterval:            cfg.Node.Snapshot.Interval,
 		DefaultNamespaceMemoryBytes: cfg.Node.Quota.Namespace.Memory.Bytes,
 		DefaultSpaceMemoryBytes:     cfg.Node.Quota.Space.Memory.Bytes,
 	}

@@ -109,7 +109,8 @@ type numericIdentityConfig struct {
 }
 
 type snapshotConfig struct {
-	Path string `mapstructure:"path"`
+	Path     string        `mapstructure:"path"`
+	Interval time.Duration `mapstructure:"interval"`
 }
 
 type timeoutConfig struct {

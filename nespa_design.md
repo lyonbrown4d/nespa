@@ -94,7 +94,7 @@ Nespa 第一阶段明确不做：
 - control rebalance 除事件外已生成 migration plan，记录需要从 source node 迁移到 target node 的 namespace/space/vslot 范围；
 - DataNode 已具备节点级 range migration primitive：按 `namespace/space/vslot` 导出 snapshot、导入 snapshot、删除源 range，并通过 TCP binary protocol 暴露给内部迁移执行器；
 - control migration executor 默认启用，会通过 Dragonboat/FSM claim planned task，顺序执行 `export -> import -> delete`，并把 task/plan 标记为 `running/done/failed`；
-- DataNode memory engine 支持本地 snapshot/restore，并可通过 `--node-snapshot-path` 做进程重启恢复；这是本地持久化基础，不等价于副本复制；
+- DataNode memory engine 支持本地 snapshot/restore，并可通过 `--node-snapshot-path` 做进程重启恢复；同时支持 `--node-snapshot-interval` 周期持久化快照（0 禁用）；这是本地持久化基础，不等价于副本复制；
 - Go SDK 已放在 `sdk/go`，通过 go work 参与多子包开发；Java SDK 已放在 `sdk/java`，使用 Gradle Kotlin DSL、wrapper、version catalog、Lombok plugin、JPMS，并带 direct TCP/wire smoke 覆盖。
 
 尚未落地或仍是设计目标：

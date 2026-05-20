@@ -2,9 +2,12 @@ package node_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lyonbrown4d/nespa/cache/engine"
 	"github.com/lyonbrown4d/nespa/node"
@@ -36,6 +39,58 @@ func TestNodeEngineSnapshotPersistence(t *testing.T) {
 	}
 	if !found || string(record.Value) != "value" {
 		t.Fatalf("restored record = %+v, found=%v", record, found)
+	}
+}
+
+func TestRunSnapshotScheduler(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	log := slog.New(slog.DiscardHandler)
+
+	var count atomic.Uint64
+	done := make(chan struct{})
+
+	go func() {
+		node.RunSnapshotSchedulerWithFunc(ctx, log, 20*time.Millisecond, func(context.Context) error {
+			count.Add(1)
+			return nil
+		})
+		close(done)
+	}()
+
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for {
+		if count.Load() >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("snapshot scheduler did not trigger enough saves: got %d", count.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	<-done
+
+	countAfterStop := count.Load()
+	time.Sleep(60 * time.Millisecond)
+	if got := count.Load(); got != countAfterStop {
+		t.Fatalf("snapshot scheduler still running after stop: before=%d after=%d", countAfterStop, got)
+	}
+}
+
+func TestRunSnapshotSchedulerDisabledOnZeroInterval(t *testing.T) {
+	ctx := context.Background()
+	log := slog.New(slog.DiscardHandler)
+	called := false
+
+	node.RunSnapshotSchedulerWithFunc(ctx, log, 0, func(context.Context) error {
+		called = true
+		return errors.New("should not be called")
+	})
+
+	if called {
+		t.Fatalf("zero interval should not execute save function")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	collectionlist "github.com/arcgolabs/collectionx/list"
@@ -204,6 +205,13 @@ func engineModule(sweepInterval time.Duration) dix.Module {
 	return dix.NewModule("node.engine",
 		dix.WithModuleHooks(
 			dix.OnStart3[*slog.Logger, node.Config, engine.Engine](node.RestoreEngineSnapshot, dix.LifecycleName("node.engine.snapshot.restore"), dix.LifecycleBefore("node.tcp.start")),
+			dix.OnStart3[*slog.Logger, node.Config, engine.Engine](func(ctx context.Context, logger *slog.Logger, cfg node.Config, eng engine.Engine) error {
+				if cfg.SnapshotInterval <= 0 || strings.TrimSpace(cfg.SnapshotPath) == "" {
+					return nil
+				}
+				go node.RunSnapshotScheduler(ctx, logger, cfg, eng)
+				return nil
+			}, dix.LifecycleName("node.engine.snapshot.schedule"), dix.LifecycleAfter("node.engine.snapshot.restore")),
 			dix.OnStart[engine.Engine](func(ctx context.Context, eng engine.Engine) error {
 				go runSweeper(ctx, eng, sweepInterval)
 				return nil
