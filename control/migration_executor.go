@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -135,12 +136,19 @@ func migrateRange(
 
 	request := migrationRangeRequest(task)
 	if task.CutoverAtUnix > 0 {
-		deleted, err := deleteMigrationSource(taskCtx, client, task, request)
-		if err != nil {
-			return task.ImportedEntries, 0, err
+		deleted, deleteErr := deleteMigrationSource(taskCtx, client, task, request)
+		unfenceErr := unfenceMigrationSource(taskCtx, client, task, request)
+		if deleteErr != nil && unfenceErr != nil {
+			return task.ImportedEntries, deleted, errors.Join(
+				fmt.Errorf("delete source migration range: %w", deleteErr),
+				fmt.Errorf("unfence migration source: %w", unfenceErr),
+			)
 		}
-		if err := unfenceMigrationSource(taskCtx, client, task, request); err != nil {
-			return task.ImportedEntries, deleted, fmt.Errorf("unfence migration source: %w", err)
+		if deleteErr != nil {
+			return task.ImportedEntries, deleted, fmt.Errorf("delete source migration range: %w", deleteErr)
+		}
+		if unfenceErr != nil {
+			return task.ImportedEntries, deleted, fmt.Errorf("unfence migration source: %w", unfenceErr)
 		}
 		return task.ImportedEntries, deleted, nil
 	}

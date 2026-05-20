@@ -141,3 +141,31 @@ func TestMigrateRangeCleanupPropagatesUnfenceError(t *testing.T) {
 		t.Fatalf("calls = %#v, want %#v", client.calls, []string{"delete", "unfence"})
 	}
 }
+
+func TestMigrateRangeCleanupUnfenceCalledEvenWhenDeleteFails(t *testing.T) {
+	t.Parallel()
+
+	deleteErr := errors.New("delete temporary failure")
+	client := &fakeMigrationRangeClient{
+		deleteErrs: []error{deleteErr},
+	}
+	task := controlapi.MigrationTaskBody{
+		PlanID:        1,
+		TaskID:        1,
+		SourceAddr:    "source",
+		TargetAddr:    "target",
+		CutoverAtUnix: 1,
+	}
+	_, _, err := migrateRange(t.Context(), nil, client, MigrationConfig{
+		TaskTimeout: time.Second,
+	}, task)
+	if err == nil {
+		t.Fatal("expected cleanup error")
+	}
+	if !errors.Is(err, deleteErr) {
+		t.Fatalf("err = %v, want delete error", err)
+	}
+	if !slices.Equal(client.calls, []string{"delete", "unfence"}) {
+		t.Fatalf("calls = %#v, want %#v", client.calls, []string{"delete", "unfence"})
+	}
+}
