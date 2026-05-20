@@ -37,6 +37,10 @@ func (c *ControlClient) Heartbeat(ctx context.Context, body controlapi.Heartbeat
 	return controlDoJSON[controlapi.HeartbeatResponse](ctx, c.client, http.MethodPut, c.baseURL+"/v1/control/nodes/heartbeat", body)
 }
 
+func (c *ControlClient) Snapshot(ctx context.Context) (controlapi.SnapshotBody, error) {
+	return controlGetJSON[controlapi.SnapshotBody](ctx, c.client, c.baseURL+"/v1/control/snapshot")
+}
+
 func normalizeBaseURL(addr string) string {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
@@ -59,6 +63,33 @@ func controlDoJSON[T any](ctx context.Context, client *http.Client, method, targ
 		return out, httpx.NewError(http.StatusBadGateway, "invalid control-plane request", err)
 	}
 	req.Header.Set("content-type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return out, httpx.NewError(http.StatusBadGateway, "control-plane request failed", err)
+	}
+	defer func() {
+		err = closeResponseBody(resp.Body, err)
+	}()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return out, httpx.NewError(resp.StatusCode, "read control-plane error response", readErr)
+		}
+		return out, httpx.NewError(resp.StatusCode, "control-plane request failed", fmt.Errorf("%s", strings.TrimSpace(string(raw))))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return out, httpx.NewError(http.StatusBadGateway, "decode control-plane response", err)
+	}
+	return out, nil
+}
+
+func controlGetJSON[T any](ctx context.Context, client *http.Client, target string) (out T, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
+	if err != nil {
+		return out, httpx.NewError(http.StatusBadGateway, "invalid control-plane request", err)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

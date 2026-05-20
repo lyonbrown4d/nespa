@@ -199,7 +199,10 @@ export a namespace/space/vslot range, import the snapshot on the target, and
 delete the source range. The control migration executor is enabled by default:
 it claims planned tasks through the control FSM, runs `export -> import ->
 delete`, and marks tasks and plans as `running`, `done`, or `failed`. Production
-retry/backoff policy and replica catch-up are the next stage.
+retry/backoff policy remains a next stage. DataNodes cache the control snapshot
+and use route `replicas` for best-effort async write-after replication after a
+primary `set`, `delete`, `touch`, `adjust`, primitive mutation, or mutating
+batch; replica catch-up and replication offsets are the next stage.
 
 Control writes run through a Dragonboat-backed Raft state machine by default.
 Use `--control-raft-dir` to persist the Dragonboat NodeHost data; when empty,

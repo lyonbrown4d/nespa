@@ -17,6 +17,7 @@ import (
 type ServerConfig struct {
 	Addr              string
 	CurrentRouteEpoch func() uint64
+	ReplicaTargets    func(cachewire.Key) []string
 }
 
 type Server struct {
@@ -24,6 +25,8 @@ type Server struct {
 	service           cache.Service
 	codec             *protocol.Codec
 	currentRouteEpoch func() uint64
+	replicaTargets    func(cachewire.Key) []string
+	replicationClient *Client
 	fences            *rangeFenceSet
 
 	mu       sync.Mutex
@@ -39,6 +42,8 @@ func NewServer(cfg ServerConfig, service cache.Service) *Server {
 		service:           service,
 		codec:             protocol.NewCodec(),
 		currentRouteEpoch: cfg.CurrentRouteEpoch,
+		replicaTargets:    cfg.ReplicaTargets,
+		replicationClient: NewClient(),
 		fences:            newRangeFenceSet(),
 	}
 }
@@ -201,6 +206,10 @@ func (s *Server) handleSet(ctx context.Context, frame protocol.Frame) protocol.F
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
+	if result.Found {
+		request.Value = value
+		s.replicateSet(ctx, request)
+	}
 	return recordFrame(frame, result.Record, result.Found)
 }
 
@@ -230,6 +239,9 @@ func (s *Server) handleDelete(ctx context.Context, frame protocol.Frame) protoco
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
+	if deleted && applied {
+		s.replicateDelete(ctx, request)
+	}
 	return metadataFrame(frame, cachewire.EncodeDeleteResponse(cachewire.DeleteResponse{Deleted: deleted && applied}), nil)
 }
 
@@ -254,6 +266,9 @@ func (s *Server) handleTouch(ctx context.Context, frame protocol.Frame) protocol
 	if err != nil {
 		return cacheErrorFrame(frame, err)
 	}
+	if touched {
+		s.replicateTouch(ctx, request)
+	}
 	return metadataFrame(frame, cachewire.EncodeTouchResponse(cachewire.TouchResponse{Touched: touched}), nil)
 }
 
@@ -265,6 +280,9 @@ func (s *Server) handleAdjust(ctx context.Context, frame protocol.Frame) protoco
 	result, err := s.service.Adjust(ctx, keyFromWire(request.Key), adjustOptionsFromWire(request))
 	if err != nil {
 		return cacheErrorFrame(frame, err)
+	}
+	if result.Found {
+		s.replicateAdjust(ctx, request)
 	}
 	return recordFrame(frame, result.Record, result.Found)
 }

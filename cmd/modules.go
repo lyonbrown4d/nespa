@@ -151,6 +151,7 @@ func nodeModule(enabled bool) dix.Module {
 				return cachetcp.NewServer(cachetcp.ServerConfig{
 					Addr:              cfg.Addr,
 					CurrentRouteEpoch: nodeSvc.RouteEpoch,
+					ReplicaTargets:    nodeSvc.ReplicationTargets,
 				}, svc)
 			}),
 		),

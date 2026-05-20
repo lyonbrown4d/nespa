@@ -35,7 +35,19 @@ func TestControlClientRegisterAndHeartbeat(t *testing.T) {
 		t.Fatalf("unexpected heartbeat response: %+v", heartbeat)
 	}
 
-	assertSeenRequests(t, seen, []string{"POST /v1/control/nodes", "PUT /v1/control/nodes/heartbeat"})
+	snapshot, err := client.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snapshot.Revision != 1 || snapshot.ClusterID != "test-cluster" {
+		t.Fatalf("unexpected snapshot response: %+v", snapshot)
+	}
+
+	assertSeenRequests(t, seen, []string{
+		"POST /v1/control/nodes",
+		"PUT /v1/control/nodes/heartbeat",
+		"GET /v1/control/snapshot",
+	})
 }
 
 func newControlClientTestServer(t *testing.T, seen *[]string) *httptest.Server {
@@ -49,6 +61,8 @@ func newControlClientTestServer(t *testing.T, seen *[]string) *httptest.Server {
 			handleRegister(t, w, r)
 		case r.Method == http.MethodPut && r.URL.Path == "/v1/control/nodes/heartbeat":
 			handleHeartbeat(t, w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/control/snapshot":
+			writeControlJSON(t, w, controlapi.SnapshotBody{ClusterID: "test-cluster", Revision: 1})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -98,6 +112,9 @@ func healthyNode(nodeID, addr string) controlapi.NodeBody {
 
 func assertSeenRequests(t *testing.T, seen, want []string) {
 	t.Helper()
+	if len(seen) != len(want) {
+		t.Fatalf("seen requests = %v, want %v", seen, want)
+	}
 	for i, item := range want {
 		if seen[i] != item {
 			t.Fatalf("seen[%d] = %q, want %q", i, seen[i], item)
