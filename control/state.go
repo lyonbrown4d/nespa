@@ -121,9 +121,7 @@ func (s *ControlState) RouteCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	nodes := s.sortedNodesLocked()
-	spaces := s.sortedSpacesLocked()
-	return len(routesForNodes(nodes, spaces))
+	return len(s.effectiveRoutesLocked())
 }
 
 func (s *ControlState) RebalanceEvents() controlapi.RebalanceEventsBody {
@@ -150,7 +148,6 @@ func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	nodes := s.sortedNodesLocked()
 	namespaces := s.sortedNamespacesLocked()
 	spaces := s.sortedSpacesLocked()
 	entities := s.sortedEntitiesLocked()
@@ -162,7 +159,7 @@ func (s *ControlState) Snapshot() controlapi.SnapshotBody {
 		Namespaces: namespaces,
 		Spaces:     spaces,
 		Entities:   entities,
-		Nodes:      nodes,
-		Routes:     routesForNodes(nodes, spaces),
+		Nodes:      s.sortedNodesLocked(),
+		Routes:     s.effectiveRoutesLocked(),
 	}
 }

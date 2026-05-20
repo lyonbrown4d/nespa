@@ -12,6 +12,7 @@ import (
 const (
 	migrationTaskPlanned = "planned"
 	migrationTaskRunning = "running"
+	migrationTaskCleanup = "cleanup"
 	migrationTaskDone    = "done"
 	migrationTaskFailed  = "failed"
 )
@@ -31,10 +32,7 @@ func (s *ControlState) ClaimMigrationTask(now time.Time) MigrationTaskResult {
 
 	plans := s.plans.Values()
 	for planIndex := range plans {
-		if !claimableMigrationPlan(plans[planIndex]) {
-			continue
-		}
-		taskIndex, ok := firstTaskWithState(plans[planIndex], migrationTaskPlanned)
+		taskIndex, ok := firstClaimableTask(plans[planIndex], now)
 		if !ok {
 			continue
 		}
@@ -46,10 +44,6 @@ func (s *ControlState) ClaimMigrationTask(now time.Time) MigrationTaskResult {
 		return MigrationTaskResult{Claimed: true, Task: task}
 	}
 	return MigrationTaskResult{}
-}
-
-func claimableMigrationPlan(plan controlapi.MigrationPlanBody) bool {
-	return plan.State == migrationTaskPlanned || plan.State == migrationTaskRunning
 }
 
 func (s *ControlState) CompleteMigrationTask(
@@ -66,14 +60,31 @@ func (s *ControlState) CompleteMigrationTask(
 	})
 }
 
+func (s *ControlState) CutoverMigrationTask(
+	planID, taskID, imported uint64,
+	now time.Time,
+) (controlapi.MigrationTaskBody, error) {
+	return s.updateMigrationTask(planID, taskID, func(task controlapi.MigrationTaskBody) controlapi.MigrationTaskBody {
+		task.State = migrationTaskCleanup
+		task.Error = ""
+		task.ImportedEntries = imported
+		task.CutoverAtUnix = now.Unix()
+		task.NextRetryUnix = 0
+		return task
+	})
+}
+
 func (s *ControlState) FailMigrationTask(
 	planID, taskID uint64,
 	message string,
+	retryAfter time.Duration,
 	now time.Time,
 ) (controlapi.MigrationTaskBody, error) {
 	return s.updateMigrationTask(planID, taskID, func(task controlapi.MigrationTaskBody) controlapi.MigrationTaskBody {
 		task.State = migrationTaskFailed
 		task.Error = message
+		task.Attempts++
+		task.NextRetryUnix = now.Add(retryAfter).Unix()
 		task.FinishedAtUnix = now.Unix()
 		return task
 	})
@@ -119,9 +130,31 @@ func firstTaskWithState(plan controlapi.MigrationPlanBody, state string) (int, b
 	return 0, false
 }
 
+func firstClaimableTask(plan controlapi.MigrationPlanBody, now time.Time) (int, bool) {
+	for index := range plan.Tasks {
+		if claimableMigrationTask(plan.Tasks[index], now) {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+func claimableMigrationTask(task controlapi.MigrationTaskBody, now time.Time) bool {
+	switch task.State {
+	case migrationTaskPlanned, migrationTaskCleanup:
+		return true
+	case migrationTaskFailed:
+		return task.NextRetryUnix <= now.Unix()
+	case migrationTaskRunning, migrationTaskDone:
+		return false
+	}
+	return false
+}
+
 func markTaskRunning(task controlapi.MigrationTaskBody, now time.Time) controlapi.MigrationTaskBody {
 	task.State = migrationTaskRunning
 	task.Error = ""
+	task.NextRetryUnix = 0
 	if task.StartedAtUnix == 0 {
 		task.StartedAtUnix = now.Unix()
 	}
@@ -135,6 +168,8 @@ func deriveMigrationPlanState(plan controlapi.MigrationPlanBody) string {
 		switch plan.Tasks[index].State {
 		case migrationTaskFailed:
 			return migrationTaskFailed
+		case migrationTaskCleanup:
+			hasRunning = true
 		case migrationTaskRunning:
 			hasRunning = true
 		case migrationTaskPlanned:

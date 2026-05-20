@@ -81,6 +81,18 @@ func DecodeMigrationDeleteRangeResponse(raw []byte) (MigrationDeleteRangeRespons
 	return MigrationDeleteRangeResponse{Deleted: value}, nil
 }
 
+func EncodeMigrationFenceResponse(response MigrationFenceResponse) []byte {
+	return encodeBool(response.Applied)
+}
+
+func DecodeMigrationFenceResponse(raw []byte) (MigrationFenceResponse, error) {
+	value, err := decodeBool(raw)
+	if err != nil {
+		return MigrationFenceResponse{}, err
+	}
+	return MigrationFenceResponse{Applied: value}, nil
+}
+
 func decodeUint64Response(raw []byte) (uint64, error) {
 	cursor, err := newCursor(raw)
 	if err != nil {

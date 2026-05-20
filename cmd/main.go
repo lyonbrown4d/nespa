@@ -134,6 +134,7 @@ type controlMigrationConfig struct {
 	Enabled bool           `mapstructure:"enabled"`
 	Sweep   intervalConfig `mapstructure:"sweep"`
 	Task    timeoutConfig  `mapstructure:"task"`
+	Retry   intervalConfig `mapstructure:"retry"`
 }
 
 type controlRaftConfig struct {

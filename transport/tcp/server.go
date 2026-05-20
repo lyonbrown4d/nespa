@@ -24,6 +24,7 @@ type Server struct {
 	service           cache.Service
 	codec             *protocol.Codec
 	currentRouteEpoch func() uint64
+	fences            *rangeFenceSet
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -38,6 +39,7 @@ func NewServer(cfg ServerConfig, service cache.Service) *Server {
 		service:           service,
 		codec:             protocol.NewCodec(),
 		currentRouteEpoch: cfg.CurrentRouteEpoch,
+		fences:            newRangeFenceSet(),
 	}
 }
 
@@ -130,6 +132,11 @@ func (s *Server) handleFrame(ctx context.Context, frame protocol.Frame) protocol
 	if stale, current := s.staleRoute(frame.RouteEpoch); stale {
 		return errorFrame(frame, protocol.ErrorNoRoute, fmt.Errorf("stale route epoch %d < %d", frame.RouteEpoch, current))
 	}
+	if fenced, err := s.fencedMutation(frame); err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
+	} else if fenced {
+		return errorFrame(frame, protocol.ErrorNoRoute, fmt.Errorf("fenced migration range for op %d", frame.Op))
+	}
 	return s.dispatchFrame(ctx, frame)
 }
 
@@ -160,6 +167,8 @@ func (s *Server) cacheHandlers() map[protocol.Op]frameHandler {
 		protocol.OpNodeExportRange:     s.handleExportRange,
 		protocol.OpNodeImportSnapshot:  s.handleImportSnapshot,
 		protocol.OpNodeDeleteRange:     s.handleDeleteRange,
+		protocol.OpNodeFenceRange:      s.handleFenceRange,
+		protocol.OpNodeUnfenceRange:    s.handleUnfenceRange,
 		protocol.OpControlSnapshot:     s.handleUnsupportedFrame,
 		protocol.OpControlWatch:        s.handleUnsupportedFrame,
 	}

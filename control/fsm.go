@@ -20,6 +20,7 @@ const (
 	CommandHeartbeat             CommandType = "heartbeat"
 	CommandAdvanceNodeLiveness   CommandType = "advance_node_liveness"
 	CommandClaimMigrationTask    CommandType = "claim_migration_task"
+	CommandCutoverMigrationTask  CommandType = "cutover_migration_task"
 	CommandCompleteMigrationTask CommandType = "complete_migration_task"
 	CommandFailMigrationTask     CommandType = "fail_migration_task"
 )
@@ -39,6 +40,7 @@ type Command struct {
 	ImportedEntries uint64      `json:"imported_entries,omitempty"`
 	DeletedEntries  uint64      `json:"deleted_entries,omitempty"`
 	MigrationError  string      `json:"migration_error,omitempty"`
+	RetryAfterMS    int64       `json:"retry_after_ms,omitempty"`
 }
 
 type ApplyResult struct {
@@ -69,6 +71,7 @@ var commandHandlers = map[CommandType]commandHandler{
 	CommandHeartbeat:             handleHeartbeatCommand,
 	CommandAdvanceNodeLiveness:   handleAdvanceNodeLivenessCommand,
 	CommandClaimMigrationTask:    handleClaimMigrationTaskCommand,
+	CommandCutoverMigrationTask:  handleCutoverMigrationTaskCommand,
 	CommandCompleteMigrationTask: handleCompleteMigrationTaskCommand,
 	CommandFailMigrationTask:     handleFailMigrationTaskCommand,
 }
@@ -119,6 +122,10 @@ func handleAdvanceNodeLivenessCommand(ctx context.Context, f *ControlFSM, comman
 
 func handleClaimMigrationTaskCommand(_ context.Context, f *ControlFSM, command Command) (ApplyResult, error) {
 	return f.applyClaimMigrationTask(command)
+}
+
+func handleCutoverMigrationTaskCommand(_ context.Context, f *ControlFSM, command Command) (ApplyResult, error) {
+	return f.applyCutoverMigrationTask(command)
 }
 
 func handleCompleteMigrationTaskCommand(_ context.Context, f *ControlFSM, command Command) (ApplyResult, error) {
@@ -179,6 +186,16 @@ func (f *ControlFSM) applyClaimMigrationTask(command Command) (ApplyResult, erro
 	return ApplyResult{MigrationTask: result}, nil
 }
 
+func (f *ControlFSM) applyCutoverMigrationTask(command Command) (ApplyResult, error) {
+	task, err := f.state.CutoverMigrationTask(
+		command.PlanID,
+		command.TaskID,
+		command.ImportedEntries,
+		f.commandTime(command),
+	)
+	return ApplyResult{MigrationTask: MigrationTaskResult{Claimed: task.State != "", Task: task}}, err
+}
+
 func (f *ControlFSM) applyCompleteMigrationTask(command Command) (ApplyResult, error) {
 	task, err := f.state.CompleteMigrationTask(
 		command.PlanID,
@@ -195,6 +212,7 @@ func (f *ControlFSM) applyFailMigrationTask(command Command) (ApplyResult, error
 		command.PlanID,
 		command.TaskID,
 		command.MigrationError,
+		time.Duration(command.RetryAfterMS)*time.Millisecond,
 		f.commandTime(command),
 	)
 	return ApplyResult{MigrationTask: MigrationTaskResult{Claimed: task.State != "", Task: task}}, err

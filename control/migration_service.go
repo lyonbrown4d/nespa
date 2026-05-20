@@ -31,6 +31,7 @@ func (s *ServiceRuntime) completeMigrationTask(
 func (s *ServiceRuntime) failMigrationTask(
 	ctx context.Context,
 	task controlapi.MigrationTaskBody,
+	retryAfter time.Duration,
 	cause error,
 ) error {
 	_, err := s.apply(ctx, Command{
@@ -38,7 +39,23 @@ func (s *ServiceRuntime) failMigrationTask(
 		PlanID:         task.PlanID,
 		TaskID:         task.TaskID,
 		MigrationError: cause.Error(),
+		RetryAfterMS:   retryAfter.Milliseconds(),
 		NowUnix:        time.Now().Unix(),
+	})
+	return err
+}
+
+func (s *ServiceRuntime) cutoverMigrationTask(
+	ctx context.Context,
+	task controlapi.MigrationTaskBody,
+	imported uint64,
+) error {
+	_, err := s.apply(ctx, Command{
+		Type:            CommandCutoverMigrationTask,
+		PlanID:          task.PlanID,
+		TaskID:          task.TaskID,
+		ImportedEntries: imported,
+		NowUnix:         time.Now().Unix(),
 	})
 	return err
 }

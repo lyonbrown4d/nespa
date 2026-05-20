@@ -50,3 +50,25 @@ func (s *Server) handleDeleteRange(ctx context.Context, frame protocol.Frame) pr
 		Deleted: result.Deleted,
 	}), nil)
 }
+
+func (s *Server) handleFenceRange(_ context.Context, frame protocol.Frame) protocol.Frame {
+	request, err := cachewire.DecodeMigrationRangeRequest(frame.Metadata)
+	if err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
+	}
+	s.fences.add(rangeFenceFromWire(request))
+	return metadataFrame(frame, cachewire.EncodeMigrationFenceResponse(cachewire.MigrationFenceResponse{
+		Applied: true,
+	}), nil)
+}
+
+func (s *Server) handleUnfenceRange(_ context.Context, frame protocol.Frame) protocol.Frame {
+	request, err := cachewire.DecodeMigrationRangeRequest(frame.Metadata)
+	if err != nil {
+		return errorFrame(frame, protocol.ErrorBadFrame, err)
+	}
+	s.fences.remove(rangeFenceFromWire(request))
+	return metadataFrame(frame, cachewire.EncodeMigrationFenceResponse(cachewire.MigrationFenceResponse{
+		Applied: true,
+	}), nil)
+}

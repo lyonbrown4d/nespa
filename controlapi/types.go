@@ -94,9 +94,12 @@ type MigrationTaskBody struct {
 	State           string `json:"state"`
 	CreatedAtUnix   int64  `json:"created_at_unix"`
 	StartedAtUnix   int64  `json:"started_at_unix,omitempty"`
+	CutoverAtUnix   int64  `json:"cutover_at_unix,omitempty"`
 	FinishedAtUnix  int64  `json:"finished_at_unix,omitempty"`
 	ImportedEntries uint64 `json:"imported_entries,omitempty"`
 	DeletedEntries  uint64 `json:"deleted_entries,omitempty"`
+	Attempts        uint64 `json:"attempts,omitempty"`
+	NextRetryUnix   int64  `json:"next_retry_unix,omitempty"`
 	Error           string `json:"error,omitempty"`
 }
 

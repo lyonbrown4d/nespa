@@ -61,6 +61,8 @@ const (
 	OpNodeExportRange
 	OpNodeImportSnapshot
 	OpNodeDeleteRange
+	OpNodeFenceRange
+	OpNodeUnfenceRange
 )
 
 type Flags uint8

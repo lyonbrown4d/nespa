@@ -61,3 +61,37 @@ func (c *Client) DeleteRange(
 	}
 	return out, nil
 }
+
+func (c *Client) FenceRange(
+	ctx context.Context,
+	addr string,
+	request cachewire.MigrationRangeRequest,
+) (cachewire.MigrationFenceResponse, error) {
+	return c.rangeFenceCommand(ctx, addr, protocol.OpNodeFenceRange, request)
+}
+
+func (c *Client) UnfenceRange(
+	ctx context.Context,
+	addr string,
+	request cachewire.MigrationRangeRequest,
+) (cachewire.MigrationFenceResponse, error) {
+	return c.rangeFenceCommand(ctx, addr, protocol.OpNodeUnfenceRange, request)
+}
+
+func (c *Client) rangeFenceCommand(
+	ctx context.Context,
+	addr string,
+	op protocol.Op,
+	request cachewire.MigrationRangeRequest,
+) (cachewire.MigrationFenceResponse, error) {
+	metadata := cachewire.EncodeMigrationRangeRequest(request)
+	frame, err := c.do(ctx, addr, op, request.RouteEpoch, metadata, nil)
+	if err != nil {
+		return cachewire.MigrationFenceResponse{}, err
+	}
+	out, decodeErr := cachewire.DecodeMigrationFenceResponse(frame.Metadata)
+	if decodeErr != nil {
+		return out, fmt.Errorf("decode cache migration fence response: %w", decodeErr)
+	}
+	return out, nil
+}

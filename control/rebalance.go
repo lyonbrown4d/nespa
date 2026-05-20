@@ -108,8 +108,14 @@ func buildMigrationTasks(
 	tasks := make([]controlapi.MigrationTaskBody, 0)
 	for currentIndex := range currentRoutes {
 		current := currentRoutes[currentIndex]
+		if current.Namespace == "" && current.Space == "" {
+			continue
+		}
 		for previousIndex := range previousRoutes {
 			previous := previousRoutes[previousIndex]
+			if previous.Namespace == "" && previous.Space == "" {
+				continue
+			}
 			if !sameRouteScope(previous, current) || previous.NodeID == current.NodeID {
 				continue
 			}

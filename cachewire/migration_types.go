@@ -34,3 +34,7 @@ type MigrationImportResponse struct {
 type MigrationDeleteRangeResponse struct {
 	Deleted uint64 `json:"deleted"`
 }
+
+type MigrationFenceResponse struct {
+	Applied bool `json:"applied"`
+}

@@ -28,6 +28,7 @@ func addServerFlags(flags *pflag.FlagSet) {
 	flags.Bool("control-migration-enabled", true, "enable control-plane migration task executor")
 	flags.Duration("control-migration-sweep-interval", time.Second, "control-plane migration executor sweep interval")
 	flags.Duration("control-migration-task-timeout", 10*time.Second, "control-plane migration task timeout")
+	flags.Duration("control-migration-retry-interval", 2*time.Second, "control-plane migration retry interval")
 	flags.Bool("frontend-enabled", false, "enable optional frontend webui/debug module")
 	flags.String("frontend-addr", "127.0.0.1:7402", "frontend HTTP listen address")
 	flags.Bool("node-enabled", true, "enable data-node TCP service")
@@ -75,6 +76,7 @@ func serverDefaults() map[string]any {
 		"control.migration.enabled":         true,
 		"control.migration.sweep.interval":  time.Second,
 		"control.migration.task.timeout":    10 * time.Second,
+		"control.migration.retry.interval":  2 * time.Second,
 		"frontend.enabled":                  false,
 		"frontend.addr":                     "127.0.0.1:7402",
 		"node.enabled":                      true,
@@ -110,6 +112,7 @@ func controlConfigFrom(cfg serverConfig) control.Config {
 			Enabled:       cfg.Control.Migration.Enabled,
 			SweepInterval: cfg.Control.Migration.Sweep.Interval,
 			TaskTimeout:   cfg.Control.Migration.Task.Timeout,
+			RetryBackoff:  cfg.Control.Migration.Retry.Interval,
 		},
 		Persistence: control.PersistenceConfig{
 			SnapshotPath: cfg.Control.Snapshot.Path,
