@@ -14,11 +14,15 @@ import (
 )
 
 type fakeMigrationRangeClient struct {
-	fenceErrs   []error
-	unfenceErrs []error
-	deleteErrs  []error
-	deleteCount uint64
-	calls       []string
+	fenceErrs       []error
+	unfenceErrs     []error
+	deleteErrs      []error
+	exportErrs      []error
+	exportSnapshots []cachewire.MigrationSnapshot
+	importErrs      []error
+	importResponses []cachewire.MigrationImportResponse
+	deleteCount     uint64
+	calls           []string
 }
 
 func (f *fakeMigrationRangeClient) FenceRange(
@@ -39,14 +43,25 @@ func (f *fakeMigrationRangeClient) ExportRange(
 	_ context.Context, _ string, _ cachewire.MigrationRangeRequest,
 ) (cachewire.MigrationSnapshot, error) {
 	f.calls = append(f.calls, "export")
-	return cachewire.MigrationSnapshot{}, nil
+	snapshot, remaining := popSnapshot(f.exportSnapshots)
+	f.exportSnapshots = remaining
+	err, remainingErr := popErr(f.exportErrs)
+	f.exportErrs = remainingErr
+	return snapshot, err
 }
 
 func (f *fakeMigrationRangeClient) ImportSnapshot(
 	_ context.Context, _ string, _ cachewire.MigrationSnapshot,
 ) (cachewire.MigrationImportResponse, error) {
 	f.calls = append(f.calls, "import")
-	return cachewire.MigrationImportResponse{Imported: 0}, nil
+	response, remaining := popImportResponse(f.importResponses)
+	f.importResponses = remaining
+	err, remainingErr := popErr(f.importErrs)
+	f.importErrs = remainingErr
+	if err != nil {
+		return response, err
+	}
+	return response, nil
 }
 
 func (f *fakeMigrationRangeClient) DeleteRange(
@@ -84,6 +99,22 @@ func popErr(errs []error) (error, []error) {
 		return nil, nil
 	}
 	return errs[0], errs[1:]
+}
+
+func popSnapshot(snapshots []cachewire.MigrationSnapshot) (cachewire.MigrationSnapshot, []cachewire.MigrationSnapshot) {
+	if len(snapshots) == 0 {
+		return cachewire.MigrationSnapshot{}, nil
+	}
+	return snapshots[0], snapshots[1:]
+}
+
+func popImportResponse(
+	responses []cachewire.MigrationImportResponse,
+) (cachewire.MigrationImportResponse, []cachewire.MigrationImportResponse) {
+	if len(responses) == 0 {
+		return cachewire.MigrationImportResponse{Imported: 0}, responses
+	}
+	return responses[0], responses[1:]
 }
 
 func TestMigrateRangeCleanupUnfencesSource(t *testing.T) {
@@ -241,5 +272,98 @@ func TestReapTimedOutMigrationTasks(t *testing.T) {
 	}
 	if stale := state.TimedOutMigrationTasks(now.Add(11*time.Second), cfg.TaskTimeout); len(stale) != 0 {
 		t.Fatalf("timed-out tasks = %#v, want none after task failed", stale)
+	}
+}
+
+func TestExecutePendingMigrationTasksRetriesAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	state := NewControlState("retry")
+	svc := &ServiceRuntime{
+		state: state,
+		fsm:   NewControlFSM(state),
+	}
+	cfg := MigrationConfig{
+		Enabled:       true,
+		TaskTimeout:   10 * time.Second,
+		RetryBackoff:  20 * time.Millisecond,
+		SweepInterval: 10 * time.Millisecond,
+	}
+	if _, err := state.RegisterNode(context.Background(), "node-1", "127.0.0.1:7403"); err != nil {
+		t.Fatalf("register source node: %v", err)
+	}
+	if _, err := state.CreateNamespace("orders"); err != nil {
+		t.Fatalf("create namespace: %v", err)
+	}
+	if _, err := state.CreateSpace(context.Background(), "orders", "session"); err != nil {
+		t.Fatalf("create space: %v", err)
+	}
+	if _, err := state.RegisterNode(context.Background(), "node-2", "127.0.0.1:7503"); err != nil {
+		t.Fatalf("register target node: %v", err)
+	}
+
+	client := &fakeMigrationRangeClient{
+		fenceErrs:       []error{errors.New("temporary fence outage")},
+		importResponses: []cachewire.MigrationImportResponse{{Imported: 11}},
+		exportSnapshots: []cachewire.MigrationSnapshot{{}},
+		importErrs:      nil,
+		exportErrs:      nil,
+		unfenceErrs:     nil,
+		deleteErrs:      nil,
+	}
+
+	executePendingMigrationTasks(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil)), svc, cfg, client)
+
+	plans := state.MigrationPlans().Plans
+	if len(plans) != 1 {
+		t.Fatalf("migration plans = %#v, want one plan", plans)
+	}
+	failed := plans[0].Tasks[0]
+	if failed.State != "failed" {
+		t.Fatalf("task state = %s, want failed", failed.State)
+	}
+	if failed.Attempts != 1 {
+		t.Fatalf("task attempts = %d, want 1", failed.Attempts)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+	executePendingMigrationTasks(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil)), svc, cfg, client)
+
+	plans = state.MigrationPlans().Plans
+	if len(plans) != 1 {
+		t.Fatalf("migration plans = %#v, want one plan after retry", plans)
+	}
+	done := plans[0].Tasks[0]
+	if done.State != "done" {
+		t.Fatalf("task state = %s, want done", done.State)
+	}
+	if done.Attempts != 1 {
+		t.Fatalf("task attempts = %d, want 1", done.Attempts)
+	}
+	if done.ImportedEntries != 11 {
+		t.Fatalf("task imported = %d, want 11", done.ImportedEntries)
+	}
+	if done.DeletedEntries != 3 {
+		t.Fatalf("task deleted = %d, want 3", done.DeletedEntries)
+	}
+	if !slices.Equal(
+		client.calls,
+		[]string{
+			"fence",
+			"fence",
+			"export",
+			"import",
+			"delete",
+			"unfence",
+		},
+	) {
+		t.Fatalf("calls = %#v, want %#v", client.calls, []string{
+			"fence",
+			"fence",
+			"export",
+			"import",
+			"delete",
+			"unfence",
+		})
 	}
 }

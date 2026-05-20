@@ -105,10 +105,20 @@ func (s *ControlState) FailMigrationTask(
 		task.State = migrationTaskFailed
 		task.Error = message
 		task.Attempts++
-		task.NextRetryUnix = now.Add(retryAfter).Unix()
+		task.NextRetryUnix = migrationTaskNextRetryUnix(now, retryAfter)
 		task.FinishedAtUnix = now.Unix()
 		return task
 	})
+}
+
+func migrationTaskNextRetryUnix(now time.Time, retryAfter time.Duration) int64 {
+	if retryAfter <= 0 {
+		return now.Unix()
+	}
+	if retryAfter < time.Second {
+		return now.Add(time.Second).Unix()
+	}
+	return now.Add(retryAfter).Unix()
 }
 
 func (s *ControlState) updateMigrationTask(
