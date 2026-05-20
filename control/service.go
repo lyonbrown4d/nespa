@@ -45,6 +45,7 @@ type ServiceRuntime struct {
 	fsm       *ControlFSM
 	liveness  LivenessConfig
 	migration MigrationConfig
+	now       func() time.Time
 	raftMu    sync.RWMutex
 	raft      *DragonboatRuntime
 }
@@ -60,6 +61,7 @@ func NewServiceRuntimeWithEvents(cfg Config, bus eventx.BusRuntime) *ServiceRunt
 		cfg:       cfg,
 		state:     state,
 		fsm:       NewControlFSM(state),
+		now:       time.Now,
 		liveness:  normalizeLivenessConfig(cfg.Liveness),
 		migration: cfg.Migration,
 	}
@@ -96,12 +98,12 @@ func (s *ServiceRuntime) BumpSpaceVersion(ctx context.Context, namespace, space 
 }
 
 func (s *ServiceRuntime) RegisterNode(ctx context.Context, nodeID, addr string) (controlapi.RegisterNodeResponse, error) {
-	result, err := s.apply(ctx, Command{Type: CommandRegisterNode, NodeID: nodeID, Addr: addr, NowUnix: time.Now().Unix()})
+	result, err := s.apply(ctx, Command{Type: CommandRegisterNode, NodeID: nodeID, Addr: addr, NowUnix: s.nowUnix()})
 	return result.RegisterNode, err
 }
 
 func (s *ServiceRuntime) Heartbeat(ctx context.Context, nodeID, addr string) (controlapi.HeartbeatResponse, error) {
-	result, err := s.apply(ctx, Command{Type: CommandHeartbeat, NodeID: nodeID, Addr: addr, NowUnix: time.Now().Unix()})
+	result, err := s.apply(ctx, Command{Type: CommandHeartbeat, NodeID: nodeID, Addr: addr, NowUnix: s.nowUnix()})
 	return result.Heartbeat, err
 }
 
@@ -154,6 +156,17 @@ func controlStateError(message string, err error) error {
 	default:
 		return httpx.NewError(http.StatusInternalServerError, message, err)
 	}
+}
+
+func (s *ServiceRuntime) nowUnix() int64 {
+	return s.nowTime().Unix()
+}
+
+func (s *ServiceRuntime) nowTime() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
 }
 
 func hasControlOopsCode(err error, codes ...string) bool {

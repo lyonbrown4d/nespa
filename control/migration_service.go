@@ -8,7 +8,7 @@ import (
 )
 
 func (s *ServiceRuntime) claimMigrationTask(ctx context.Context) (MigrationTaskResult, error) {
-	result, err := s.apply(ctx, Command{Type: CommandClaimMigrationTask, NowUnix: time.Now().Unix()})
+	result, err := s.apply(ctx, Command{Type: CommandClaimMigrationTask, NowUnix: s.nowUnix()})
 	return result.MigrationTask, err
 }
 
@@ -27,7 +27,7 @@ func (s *ServiceRuntime) completeMigrationTask(
 		TaskID:          task.TaskID,
 		ImportedEntries: imported,
 		DeletedEntries:  deleted,
-		NowUnix:         time.Now().Unix(),
+		NowUnix:         s.nowUnix(),
 	})
 	return err
 }
@@ -44,7 +44,7 @@ func (s *ServiceRuntime) failMigrationTask(
 		TaskID:         task.TaskID,
 		MigrationError: cause.Error(),
 		RetryAfterMS:   retryAfter.Milliseconds(),
-		NowUnix:        time.Now().Unix(),
+		NowUnix:        s.nowUnix(),
 	})
 	return err
 }
@@ -59,7 +59,7 @@ func (s *ServiceRuntime) cutoverMigrationTask(
 		PlanID:          task.PlanID,
 		TaskID:          task.TaskID,
 		ImportedEntries: imported,
-		NowUnix:         time.Now().Unix(),
+		NowUnix:         s.nowUnix(),
 	})
 	return err
 }
