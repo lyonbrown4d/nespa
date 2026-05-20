@@ -3,6 +3,8 @@ package control
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"slices"
 	"testing"
 	"time"
@@ -167,5 +169,77 @@ func TestMigrateRangeCleanupUnfenceCalledEvenWhenDeleteFails(t *testing.T) {
 	}
 	if !slices.Equal(client.calls, []string{"delete", "unfence"}) {
 		t.Fatalf("calls = %#v, want %#v", client.calls, []string{"delete", "unfence"})
+	}
+}
+
+func TestReapTimedOutMigrationTasks(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(10, 0)
+	state := NewControlStateWithClock("test", func() time.Time { return now })
+	cfg := MigrationConfig{
+		TaskTimeout:  10 * time.Second,
+		RetryBackoff: 2 * time.Second,
+	}
+
+	if _, err := state.RegisterNode(context.Background(), "node-1", "127.0.0.1:7403"); err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+	if _, err := state.CreateNamespace("orders"); err != nil {
+		t.Fatalf("create namespace: %v", err)
+	}
+	if _, err := state.CreateSpace(context.Background(), "orders", "session"); err != nil {
+		t.Fatalf("create space: %v", err)
+	}
+	if _, err := state.RegisterNode(context.Background(), "node-2", "127.0.0.1:7503"); err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	claimed := state.ClaimMigrationTask(now)
+	if !claimed.Claimed {
+		t.Fatal("expected claim")
+	}
+	task := claimed.Task
+
+	svc := &ServiceRuntime{
+		state: state,
+		fsm:   NewControlFSM(state),
+	}
+
+	// before timeout: task is still running and should not be reaped.
+	reapTimedOutMigrationTasks(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)), svc, cfg, now.Add(5*time.Second))
+	if stale := state.TimedOutMigrationTasks(now.Add(5*time.Second), cfg.TaskTimeout); len(stale) != 0 {
+		t.Fatalf("timed-out tasks = %#v, want none before timeout", stale)
+	}
+
+	running := state.ClaimMigrationTask(now.Add(5 * time.Second))
+	if running.Claimed {
+		t.Fatalf("expected no claim while task is still running before timeout, got %+v", running)
+	}
+
+	// at timeout boundary: task should be moved to failed state and retriable.
+	reapTimedOutMigrationTasks(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)), svc, cfg, now.Add(11*time.Second))
+	plans := state.MigrationPlans().Plans
+	if len(plans) != 1 || len(plans[0].Tasks) != 1 {
+		t.Fatalf("migration plans = %+v, want one plan with one task", plans)
+	}
+	reaped := plans[0].Tasks[0]
+	if reaped.TaskID != task.TaskID || reaped.PlanID != task.PlanID {
+		t.Fatalf("reaped task = %+v, want %v/%v", reaped, task.PlanID, task.TaskID)
+	}
+	if reaped.State != "failed" {
+		t.Fatalf("task state = %s, want failed", reaped.State)
+	}
+	if reaped.Attempts != 1 {
+		t.Fatalf("task attempts = %d, want 1", reaped.Attempts)
+	}
+	if reaped.Error != "migration task timed out" {
+		t.Fatalf("task error = %q, want migration task timed out", reaped.Error)
+	}
+	if reaped.NextRetryUnix <= reaped.StartedAtUnix {
+		t.Fatalf("next retry unix = %d, want after started_at_unix", reaped.NextRetryUnix)
+	}
+	if stale := state.TimedOutMigrationTasks(now.Add(11*time.Second), cfg.TaskTimeout); len(stale) != 0 {
+		t.Fatalf("timed-out tasks = %#v, want none after task failed", stale)
 	}
 }

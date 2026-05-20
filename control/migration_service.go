@@ -12,6 +12,10 @@ func (s *ServiceRuntime) claimMigrationTask(ctx context.Context) (MigrationTaskR
 	return result.MigrationTask, err
 }
 
+func (s *ServiceRuntime) timedOutMigrationTasks(now time.Time, timeout time.Duration) []controlapi.MigrationTaskBody {
+	return s.state.TimedOutMigrationTasks(now, timeout)
+}
+
 func (s *ServiceRuntime) completeMigrationTask(
 	ctx context.Context,
 	task controlapi.MigrationTaskBody,

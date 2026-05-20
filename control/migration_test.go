@@ -91,6 +91,43 @@ func TestControlStateFailedMigrationTaskHonorsRetryBackoff(t *testing.T) {
 	}
 }
 
+func TestControlStateTimedOutMigrationTasks(t *testing.T) {
+	now := time.Unix(10, 0)
+	state := control.NewControlStateWithClock("test", func() time.Time { return now })
+	registerNode(t, state)
+	createOrdersSession(t, state)
+	registerSpecificNode(t, state, "node-2", "127.0.0.1:7503")
+
+	claimed := state.ClaimMigrationTask(now)
+	if !claimed.Claimed {
+		t.Fatal("expected join task claim")
+	}
+	taskID := claimed.Task.TaskID
+	planID := claimed.Task.PlanID
+
+	stillRunning := state.TimedOutMigrationTasks(now.Add(9*time.Second), 10*time.Second)
+	if len(stillRunning) != 0 {
+		t.Fatalf("timed-out tasks = %+v, want none", stillRunning)
+	}
+
+	markedCutover := now.Add(1 * time.Second)
+	if _, err := state.CutoverMigrationTask(planID, taskID, 0, markedCutover); err != nil {
+		t.Fatalf("cutover migration task: %v", err)
+	}
+
+	if notStale := state.TimedOutMigrationTasks(markedCutover.Add(8*time.Second), 10*time.Second); len(notStale) != 0 {
+		t.Fatalf("timed-out tasks = %+v, want none before timeout", notStale)
+	}
+
+	stale := state.TimedOutMigrationTasks(markedCutover.Add(9*time.Second), 10*time.Second)
+	if len(stale) != 1 {
+		t.Fatalf("timed-out tasks = %+v, want one cleanup task", stale)
+	}
+	if stale[0].State != "cleanup" {
+		t.Fatalf("timed-out task = %+v, want cleanup state", stale[0])
+	}
+}
+
 func TestControlStateDeadNodeMigrationTaskRetryThenCompletes(t *testing.T) {
 	now := time.Unix(10, 0)
 	state := control.NewControlStateWithClock("test", func() time.Time { return now })

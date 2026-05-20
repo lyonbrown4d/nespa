@@ -46,6 +46,27 @@ func (s *ControlState) ClaimMigrationTask(now time.Time) MigrationTaskResult {
 	return MigrationTaskResult{}
 }
 
+func (s *ControlState) TimedOutMigrationTasks(now time.Time, timeout time.Duration) []controlapi.MigrationTaskBody {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if timeout <= 0 {
+		return nil
+	}
+
+	plans := s.plans.Values()
+	var timedOut []controlapi.MigrationTaskBody
+	for planIndex := range plans {
+		for taskIndex := range plans[planIndex].Tasks {
+			task := plans[planIndex].Tasks[taskIndex]
+			if timedOutMigrationTask(task, now, timeout) {
+				timedOut = append(timedOut, task)
+			}
+		}
+	}
+	return timedOut
+}
+
 func (s *ControlState) CompleteMigrationTask(
 	planID, taskID, imported, deleted uint64,
 	now time.Time,
@@ -185,4 +206,16 @@ func deriveMigrationPlanState(plan controlapi.MigrationPlanBody) string {
 
 func migrationTaskNotFound(planID, taskID uint64) error {
 	return fmt.Errorf("%w: plan=%d task=%d", ErrMigrationTaskNotFound, planID, taskID)
+}
+
+func timedOutMigrationTask(task controlapi.MigrationTaskBody, now time.Time, timeout time.Duration) bool {
+	switch task.State {
+	case migrationTaskRunning, migrationTaskCleanup:
+	default:
+		return false
+	}
+	if task.StartedAtUnix == 0 {
+		return false
+	}
+	return now.Sub(time.Unix(task.StartedAtUnix, 0)) >= timeout
 }

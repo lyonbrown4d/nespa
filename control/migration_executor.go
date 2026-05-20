@@ -83,6 +83,7 @@ func executePendingMigrationTasks(
 	cfg MigrationConfig,
 	client migrationRangeClient,
 ) {
+	reapTimedOutMigrationTasks(ctx, logger, svc, cfg, time.Now())
 	for {
 		result, err := svc.claimMigrationTask(ctx)
 		if err != nil {
@@ -93,6 +94,32 @@ func executePendingMigrationTasks(
 			return
 		}
 		executeClaimedMigrationTask(ctx, logger, svc, cfg, client, result.Task)
+	}
+}
+
+func reapTimedOutMigrationTasks(
+	ctx context.Context,
+	logger *slog.Logger,
+	svc *ServiceRuntime,
+	cfg MigrationConfig,
+	now time.Time,
+) {
+	staleTasks := svc.timedOutMigrationTasks(now, cfg.TaskTimeout)
+	for _, task := range staleTasks {
+		err := svc.failMigrationTask(
+			ctx,
+			task,
+			retryDelay(task, cfg),
+			fmt.Errorf("migration task timed out"),
+		)
+		if err != nil {
+			logger.Warn(
+				"control migration task reap failed",
+				"plan_id", task.PlanID,
+				"task_id", task.TaskID,
+				"error", err,
+			)
+		}
 	}
 }
 
