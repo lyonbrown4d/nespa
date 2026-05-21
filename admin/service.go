@@ -32,18 +32,23 @@ type SummaryBody struct {
 }
 
 type ReplicationBody struct {
-	QueueDepth        uint64 `json:"queue_depth"`
-	QueueCapacity     uint64 `json:"queue_capacity"`
-	Enqueued          uint64 `json:"enqueued"`
-	Dropped           uint64 `json:"dropped"`
-	Attempts          uint64 `json:"attempts"`
-	Successes         uint64 `json:"successes"`
-	Failures          uint64 `json:"failures"`
-	Retrying          bool   `json:"retrying"`
-	ActiveTarget      string `json:"active_target,omitempty"`
-	LastError         string `json:"last_error,omitempty"`
-	LastErrorUnixMs   int64  `json:"last_error_unix_ms,omitempty"`
-	LastSuccessUnixMs int64  `json:"last_success_unix_ms,omitempty"`
+	QueueDepth          uint64 `json:"queue_depth"`
+	QueueCapacity       uint64 `json:"queue_capacity"`
+	Enqueued            uint64 `json:"enqueued"`
+	Dropped             uint64 `json:"dropped"`
+	Attempts            uint64 `json:"attempts"`
+	Successes           uint64 `json:"successes"`
+	Failures            uint64 `json:"failures"`
+	LastQueuedSequence  uint64 `json:"last_queued_sequence"`
+	LastAttemptSequence uint64 `json:"last_attempt_sequence"`
+	LastSuccessSequence uint64 `json:"last_success_sequence"`
+	LastFailureSequence uint64 `json:"last_failure_sequence"`
+	LastDroppedSequence uint64 `json:"last_dropped_sequence"`
+	Retrying            bool   `json:"retrying"`
+	ActiveTarget        string `json:"active_target,omitempty"`
+	LastError           string `json:"last_error,omitempty"`
+	LastErrorUnixMs     int64  `json:"last_error_unix_ms,omitempty"`
+	LastSuccessUnixMs   int64  `json:"last_success_unix_ms,omitempty"`
 }
 
 func HTTPConfig(cfg Config) runtime.HTTPConfig {

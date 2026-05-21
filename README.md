@@ -204,8 +204,9 @@ and use route `replicas` for best-effort async write-after replication after a
 primary `set`, `delete`, `touch`, `adjust`, primitive mutation, or mutating
 batch. Replication is sent through a bounded dispatcher queue to preserve async
 send order and retry transient send failures in memory; durable replica catch-up
-and replication offsets are the next stage. The admin summary exposes queue,
-drop, retry, success, and failure counters for this replication path.
+and persisted replication offsets are the next stage. The admin summary exposes
+queue, drop, retry, sequence, success, and failure counters for this replication
+path.
 
 Control writes run through a Dragonboat-backed Raft state machine by default.
 Use `--control-raft-dir` to persist the Dragonboat NodeHost data; when empty,

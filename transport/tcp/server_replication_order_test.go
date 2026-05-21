@@ -63,6 +63,7 @@ func TestClientServerRetriesReplicationAfterTransientFailure(t *testing.T) {
 
 	waitBlockingReplicaSignal(t, replica.firstFailed)
 	waitBlockingReplicaSignal(t, replica.retrySucceeded)
+	requireEventuallyReplicationRetrySequence(t, source, 1)
 }
 
 type blockingSetReplica struct {
@@ -240,4 +241,30 @@ func waitBlockingReplicaSignal(t *testing.T, signal <-chan struct{}) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for blocking replica signal")
 	}
+}
+
+func requireEventuallyReplicationRetrySequence(t *testing.T, server *cachetcp.Server, want uint64) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	var last cachetcp.ReplicationStats
+	for time.Now().Before(deadline) {
+		last = server.ReplicationStats()
+		if replicationRetryStatsReachedSequence(last, want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("replication retry stats = %+v, want retried sequence %d", last, want)
+}
+
+func replicationRetryStatsReachedSequence(stats cachetcp.ReplicationStats, want uint64) bool {
+	return stats.Enqueued == want &&
+		stats.Attempts == 2 &&
+		stats.Successes == 1 &&
+		stats.Failures == 1 &&
+		stats.LastQueuedSequence == want &&
+		stats.LastAttemptSequence == want &&
+		stats.LastSuccessSequence == want &&
+		stats.LastFailureSequence == want
 }

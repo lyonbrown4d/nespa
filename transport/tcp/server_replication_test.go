@@ -25,6 +25,7 @@ func TestClientServerReplicatesSetToReplica(t *testing.T) {
 	}
 
 	requireEventuallyWireValue(t, client, target.Addr(), key, "payload")
+	requireEventuallyReplicationSequence(t, source, 1)
 }
 
 func TestClientServerReplicatesDeleteToReplica(t *testing.T) {
@@ -234,4 +235,28 @@ func requireEventuallyReplicaExpireAfter(
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("replica record = %+v, want expire_at > %d", last, minExpireAtUnixMs)
+}
+
+func requireEventuallyReplicationSequence(t *testing.T, server *cachetcp.Server, want uint64) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	var last cachetcp.ReplicationStats
+	for time.Now().Before(deadline) {
+		last = server.ReplicationStats()
+		if replicationStatsReachedSequence(last, want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("replication stats = %+v, want replicated sequence %d", last, want)
+}
+
+func replicationStatsReachedSequence(stats cachetcp.ReplicationStats, want uint64) bool {
+	return stats.Enqueued == want &&
+		stats.Attempts == want &&
+		stats.Successes == want &&
+		stats.LastQueuedSequence == want &&
+		stats.LastAttemptSequence == want &&
+		stats.LastSuccessSequence == want
 }

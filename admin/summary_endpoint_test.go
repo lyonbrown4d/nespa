@@ -106,18 +106,23 @@ func newSummaryEndpointForTest(t *testing.T) summaryEndpointForTest {
 	}
 	replicationSvc := fakeSummaryReplicationService{
 		stats: cachetcp.ReplicationStats{
-			QueueDepth:        2,
-			QueueCapacity:     16,
-			Enqueued:          5,
-			Dropped:           1,
-			Attempts:          7,
-			Successes:         4,
-			Failures:          3,
-			Retrying:          true,
-			ActiveTarget:      "127.0.0.1:7503",
-			LastError:         "dial failed",
-			LastErrorUnixMs:   1000,
-			LastSuccessUnixMs: 900,
+			QueueDepth:          2,
+			QueueCapacity:       16,
+			Enqueued:            5,
+			Dropped:             1,
+			Attempts:            7,
+			Successes:           4,
+			Failures:            3,
+			LastQueuedSequence:  8,
+			LastAttemptSequence: 7,
+			LastSuccessSequence: 6,
+			LastFailureSequence: 7,
+			LastDroppedSequence: 3,
+			Retrying:            true,
+			ActiveTarget:        "127.0.0.1:7503",
+			LastError:           "dial failed",
+			LastErrorUnixMs:     1000,
+			LastSuccessUnixMs:   900,
 		},
 	}
 
@@ -169,6 +174,7 @@ func assertSummaryReplicationStats(t *testing.T, body admin.SummaryBody) {
 	t.Helper()
 	assertSummaryReplicationQueueStats(t, body.Replication)
 	assertSummaryReplicationSendStats(t, body.Replication)
+	assertSummaryReplicationSequenceStats(t, body.Replication)
 	assertSummaryReplicationRetryStats(t, body.Replication)
 }
 
@@ -186,6 +192,16 @@ func assertSummaryReplicationSendStats(t *testing.T, body admin.ReplicationBody)
 	t.Helper()
 	if body.Attempts != 7 || body.Successes != 4 || body.Failures != 3 {
 		t.Fatalf("replication send stats = %+v", body)
+	}
+}
+
+func assertSummaryReplicationSequenceStats(t *testing.T, body admin.ReplicationBody) {
+	t.Helper()
+	if body.LastQueuedSequence != 8 || body.LastAttemptSequence != 7 {
+		t.Fatalf("replication active sequence stats = %+v", body)
+	}
+	if body.LastSuccessSequence != 6 || body.LastFailureSequence != 7 || body.LastDroppedSequence != 3 {
+		t.Fatalf("replication terminal sequence stats = %+v", body)
 	}
 }
 
