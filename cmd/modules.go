@@ -149,9 +149,10 @@ func nodeModule(enabled bool) dix.Module {
 			dix.Provider2(node.NewServiceRuntime),
 			dix.Provider3(func(cfg node.Config, svc cache.Service, nodeSvc *node.ServiceRuntime) *cachetcp.Server {
 				return cachetcp.NewServer(cachetcp.ServerConfig{
-					Addr:              cfg.Addr,
-					CurrentRouteEpoch: nodeSvc.RouteEpoch,
-					ReplicaTargets:    nodeSvc.ReplicationTargets,
+					Addr:                  cfg.Addr,
+					CurrentRouteEpoch:     nodeSvc.RouteEpoch,
+					ReplicaTargets:        nodeSvc.ReplicationTargets,
+					ReplicationOutboxPath: cfg.ReplicationOutboxPath,
 				}, svc)
 			}),
 		),

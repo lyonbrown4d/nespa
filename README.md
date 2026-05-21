@@ -202,11 +202,15 @@ delete`, and marks tasks and plans as `running`, `done`, or `failed`. Production
 retry/backoff policy remains a next stage. DataNodes cache the control snapshot
 and use route `replicas` for best-effort async write-after replication after a
 primary `set`, `delete`, `touch`, `adjust`, primitive mutation, or mutating
-batch. Replication is sent through a bounded dispatcher queue to preserve async
-send order and retry transient send failures in memory; durable replica catch-up
-and persisted replication offsets are the next stage. The admin summary exposes
-queue, drop, retry, sequence, success, and failure counters for this replication
-path.
+batch. Replication is represented as explicit wire commands and sent through a
+bounded dispatcher queue to preserve async send order and retry transient send
+failures in memory. When `--node-replication-outbox-path` is set, the primary
+also appends each queued replication command to a local JSONL outbox; restart
+scans that file to continue sequence numbering without replaying non-idempotent
+mutations and persists per-replica ack offsets in a sidecar
+`<outbox>.acks.json` file after successful sends. Replay and replica catch-up are
+the next stage. The admin summary exposes queue, drop, retry, outbox, ack,
+sequence, success, and failure counters for this replication path.
 
 Control writes run through a Dragonboat-backed Raft state machine by default.
 Use `--control-raft-dir` to persist the Dragonboat NodeHost data; when empty,

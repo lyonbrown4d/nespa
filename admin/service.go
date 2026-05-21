@@ -39,13 +39,22 @@ type ReplicationBody struct {
 	Attempts            uint64 `json:"attempts"`
 	Successes           uint64 `json:"successes"`
 	Failures            uint64 `json:"failures"`
+	OutboxEntries       uint64 `json:"outbox_entries"`
+	OutboxFailures      uint64 `json:"outbox_failures"`
+	AckTargets          uint64 `json:"ack_targets"`
+	AckFailures         uint64 `json:"ack_failures"`
 	LastQueuedSequence  uint64 `json:"last_queued_sequence"`
 	LastAttemptSequence uint64 `json:"last_attempt_sequence"`
 	LastSuccessSequence uint64 `json:"last_success_sequence"`
 	LastFailureSequence uint64 `json:"last_failure_sequence"`
 	LastDroppedSequence uint64 `json:"last_dropped_sequence"`
+	LastOutboxSequence  uint64 `json:"last_outbox_sequence"`
+	LastAckSequence     uint64 `json:"last_ack_sequence"`
 	Retrying            bool   `json:"retrying"`
 	ActiveTarget        string `json:"active_target,omitempty"`
+	LastAckTarget       string `json:"last_ack_target,omitempty"`
+	LastAckError        string `json:"last_ack_error,omitempty"`
+	LastOutboxError     string `json:"last_outbox_error,omitempty"`
 	LastError           string `json:"last_error,omitempty"`
 	LastErrorUnixMs     int64  `json:"last_error_unix_ms,omitempty"`
 	LastSuccessUnixMs   int64  `json:"last_success_unix_ms,omitempty"`

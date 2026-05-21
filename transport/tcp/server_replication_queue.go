@@ -13,12 +13,10 @@ const (
 	defaultReplicationRetryMaxDelay     = 500 * time.Millisecond
 )
 
-type replicationSend func(context.Context, *Client, string) error
-
 type replicationJob struct {
 	sequence uint64
 	target   string
-	send     replicationSend
+	command  replicationCommand
 }
 
 type ReplicationStats struct {
@@ -29,13 +27,22 @@ type ReplicationStats struct {
 	Attempts            uint64
 	Successes           uint64
 	Failures            uint64
+	OutboxEntries       uint64
+	OutboxFailures      uint64
+	AckTargets          uint64
+	AckFailures         uint64
 	LastQueuedSequence  uint64
 	LastAttemptSequence uint64
 	LastSuccessSequence uint64
 	LastFailureSequence uint64
 	LastDroppedSequence uint64
+	LastOutboxSequence  uint64
+	LastAckSequence     uint64
 	Retrying            bool
 	ActiveTarget        string
+	LastAckTarget       string
+	LastAckError        string
+	LastOutboxError     string
 	LastError           string
 	LastErrorUnixMs     int64
 	LastSuccessUnixMs   int64
@@ -56,6 +63,8 @@ type replicationDispatcher struct {
 	stats   ReplicationStats
 
 	nextSequence uint64
+	outbox       *replicationOutbox
+	acks         *replicationAckStore
 }
 
 func newReplicationDispatcher(client *Client, timeout time.Duration, queueSize int) *replicationDispatcher {
@@ -79,8 +88,8 @@ func newReplicationDispatcher(client *Client, timeout time.Duration, queueSize i
 	return dispatcher
 }
 
-func (d *replicationDispatcher) Enqueue(target string, send replicationSend) {
-	if target == "" || send == nil {
+func (d *replicationDispatcher) Enqueue(target string, command replicationCommand) {
+	if target == "" || !command.valid() {
 		return
 	}
 	select {
@@ -90,14 +99,38 @@ func (d *replicationDispatcher) Enqueue(target string, send replicationSend) {
 	}
 
 	sequence := d.nextReplicationSequence()
+	d.appendOutbox(sequence, target, command)
 	select {
 	case <-d.ctx.Done():
 		return
-	case d.jobs <- replicationJob{sequence: sequence, target: target, send: send}:
+	case d.jobs <- replicationJob{sequence: sequence, target: target, command: command}:
 		d.recordEnqueued(sequence)
 	default:
 		d.recordDropped(sequence)
 	}
+}
+
+func (d *replicationDispatcher) OpenOutbox(path string) error {
+	if !replicationOutboxEnabled(path) {
+		return nil
+	}
+	snapshot, err := scanReplicationOutbox(path)
+	if err != nil {
+		return err
+	}
+	outbox, err := openReplicationOutbox(path)
+	if err != nil {
+		return err
+	}
+	acks, err := openReplicationAckStore(path)
+	if err != nil {
+		return err
+	}
+	d.outbox = outbox
+	d.acks = acks
+	d.restoreOutboxSnapshot(snapshot)
+	d.restoreAckSnapshot(acks.Snapshot())
+	return nil
 }
 
 func (d *replicationDispatcher) Stop(ctx context.Context) error {
@@ -111,6 +144,9 @@ func (d *replicationDispatcher) Stop(ctx context.Context) error {
 
 	select {
 	case <-done:
+		if err := d.outbox.Close(); err != nil {
+			return err
+		}
 		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("stop replication dispatcher: %w", ctx.Err())
@@ -133,10 +169,11 @@ func (d *replicationDispatcher) send(job replicationJob) {
 	for {
 		ctx, cancel := context.WithTimeout(d.ctx, d.timeout)
 		d.recordAttempt(job)
-		err := job.send(ctx, d.client, job.target)
+		err := job.command.send(ctx, d.client, job.target)
 		cancel()
 		if err == nil {
 			d.recordSuccess(job)
+			d.ackSuccess(job)
 			return
 		}
 		d.recordFailure(job, err)
@@ -145,65 +182,6 @@ func (d *replicationDispatcher) send(job replicationJob) {
 		}
 		delay = nextReplicationRetryDelay(delay, d.retryMaxDelay)
 	}
-}
-
-func (d *replicationDispatcher) Stats() ReplicationStats {
-	d.statsMu.RLock()
-	stats := d.stats
-	d.statsMu.RUnlock()
-	stats.QueueDepth = uint64(len(d.jobs))
-	stats.QueueCapacity = uint64(cap(d.jobs))
-	return stats
-}
-
-func (d *replicationDispatcher) recordEnqueued(sequence uint64) {
-	d.statsMu.Lock()
-	d.stats.Enqueued++
-	d.stats.LastQueuedSequence = sequence
-	d.statsMu.Unlock()
-}
-
-func (d *replicationDispatcher) recordDropped(sequence uint64) {
-	d.statsMu.Lock()
-	d.stats.Dropped++
-	d.stats.LastDroppedSequence = sequence
-	d.statsMu.Unlock()
-}
-
-func (d *replicationDispatcher) recordAttempt(job replicationJob) {
-	d.statsMu.Lock()
-	d.stats.Attempts++
-	d.stats.ActiveTarget = job.target
-	d.stats.LastAttemptSequence = job.sequence
-	d.statsMu.Unlock()
-}
-
-func (d *replicationDispatcher) recordSuccess(job replicationJob) {
-	d.statsMu.Lock()
-	d.stats.Successes++
-	d.stats.Retrying = false
-	d.stats.ActiveTarget = ""
-	d.stats.LastSuccessSequence = job.sequence
-	d.stats.LastSuccessUnixMs = time.Now().UnixMilli()
-	d.statsMu.Unlock()
-}
-
-func (d *replicationDispatcher) recordFailure(job replicationJob, err error) {
-	d.statsMu.Lock()
-	d.stats.Failures++
-	d.stats.Retrying = true
-	d.stats.ActiveTarget = job.target
-	d.stats.LastFailureSequence = job.sequence
-	d.stats.LastError = err.Error()
-	d.stats.LastErrorUnixMs = time.Now().UnixMilli()
-	d.statsMu.Unlock()
-}
-
-func (d *replicationDispatcher) nextReplicationSequence() uint64 {
-	d.statsMu.Lock()
-	defer d.statsMu.Unlock()
-	d.nextSequence++
-	return d.nextSequence
 }
 
 func (d *replicationDispatcher) waitRetry(delay time.Duration) bool {

@@ -21,6 +21,7 @@ type Config struct {
 	HeartbeatInterval           time.Duration
 	SnapshotPath                string
 	SnapshotInterval            time.Duration
+	ReplicationOutboxPath       string
 	DefaultNamespaceMemoryBytes uint64
 	DefaultSpaceMemoryBytes     uint64
 }

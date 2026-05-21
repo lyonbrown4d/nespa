@@ -14,12 +14,6 @@ import (
 	"github.com/lyonbrown4d/nespa/protocol"
 )
 
-type ServerConfig struct {
-	Addr              string
-	CurrentRouteEpoch func() uint64
-	ReplicaTargets    func(cachewire.Key) []string
-}
-
 type Server struct {
 	addr              string
 	service           cache.Service
@@ -27,6 +21,7 @@ type Server struct {
 	currentRouteEpoch func() uint64
 	replicaTargets    func(cachewire.Key) []string
 	replication       *replicationDispatcher
+	replicationOutbox string
 	fences            *rangeFenceSet
 
 	mu       sync.Mutex
@@ -36,35 +31,11 @@ type Server struct {
 
 type frameHandler func(context.Context, protocol.Frame) protocol.Frame
 
-func NewServer(cfg ServerConfig, service cache.Service) *Server {
-	return &Server{
-		addr:              cfg.Addr,
-		service:           service,
-		codec:             protocol.NewCodec(),
-		currentRouteEpoch: cfg.CurrentRouteEpoch,
-		replicaTargets:    cfg.ReplicaTargets,
-		replication:       newReplicationDispatcher(NewClient(), defaultReplicationTimeout, defaultReplicationQueueSize),
-		fences:            newRangeFenceSet(),
-	}
-}
-
-func (s *Server) Addr() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.listener != nil {
-		return s.listener.Addr().String()
-	}
-	return s.addr
-}
-
-func (s *Server) ReplicationStats() ReplicationStats {
-	if s.replication == nil {
-		return ReplicationStats{}
-	}
-	return s.replication.Stats()
-}
-
 func (s *Server) Start(ctx context.Context, logger *slog.Logger) error {
+	if err := s.replication.OpenOutbox(s.replicationOutbox); err != nil {
+		return fmt.Errorf("open cache tcp replication outbox: %w", err)
+	}
+
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("listen cache tcp server: %w", err)

@@ -113,13 +113,22 @@ func newSummaryEndpointForTest(t *testing.T) summaryEndpointForTest {
 			Attempts:            7,
 			Successes:           4,
 			Failures:            3,
+			OutboxEntries:       5,
+			OutboxFailures:      1,
+			AckTargets:          2,
+			AckFailures:         1,
 			LastQueuedSequence:  8,
 			LastAttemptSequence: 7,
 			LastSuccessSequence: 6,
 			LastFailureSequence: 7,
 			LastDroppedSequence: 3,
+			LastOutboxSequence:  8,
+			LastAckSequence:     6,
 			Retrying:            true,
 			ActiveTarget:        "127.0.0.1:7503",
+			LastAckTarget:       "127.0.0.1:7504",
+			LastAckError:        "ack write failed",
+			LastOutboxError:     "sync failed",
 			LastError:           "dial failed",
 			LastErrorUnixMs:     1000,
 			LastSuccessUnixMs:   900,
@@ -174,6 +183,8 @@ func assertSummaryReplicationStats(t *testing.T, body admin.SummaryBody) {
 	t.Helper()
 	assertSummaryReplicationQueueStats(t, body.Replication)
 	assertSummaryReplicationSendStats(t, body.Replication)
+	assertSummaryReplicationOutboxStats(t, body.Replication)
+	assertSummaryReplicationAckStats(t, body.Replication)
 	assertSummaryReplicationSequenceStats(t, body.Replication)
 	assertSummaryReplicationRetryStats(t, body.Replication)
 }
@@ -192,6 +203,26 @@ func assertSummaryReplicationSendStats(t *testing.T, body admin.ReplicationBody)
 	t.Helper()
 	if body.Attempts != 7 || body.Successes != 4 || body.Failures != 3 {
 		t.Fatalf("replication send stats = %+v", body)
+	}
+}
+
+func assertSummaryReplicationOutboxStats(t *testing.T, body admin.ReplicationBody) {
+	t.Helper()
+	if body.OutboxEntries != 5 || body.OutboxFailures != 1 || body.LastOutboxSequence != 8 {
+		t.Fatalf("replication outbox stats = %+v", body)
+	}
+	if body.LastOutboxError != "sync failed" {
+		t.Fatalf("replication outbox error = %+v", body)
+	}
+}
+
+func assertSummaryReplicationAckStats(t *testing.T, body admin.ReplicationBody) {
+	t.Helper()
+	if body.AckTargets != 2 || body.AckFailures != 1 || body.LastAckSequence != 6 {
+		t.Fatalf("replication ack stats = %+v", body)
+	}
+	if body.LastAckTarget != "127.0.0.1:7504" || body.LastAckError != "ack write failed" {
+		t.Fatalf("replication ack detail = %+v", body)
 	}
 }
 

@@ -94,7 +94,7 @@ Nespa 第一阶段明确不做：
 - control rebalance 除事件外已生成 migration plan，记录需要从 source node 迁移到 target node 的 namespace/space/vslot 范围；control snapshot 的 route 仍以 `node_id/addr` 表示 primary，同时携带 `replicas` 作为 DataNode async replication 的目标元数据；
 - DataNode 已具备节点级 range migration primitive：按 `namespace/space/vslot` 导出 snapshot、导入 snapshot、删除源 range，并通过 TCP binary protocol 暴露给内部迁移执行器；
 - control migration executor 默认启用，会通过 Dragonboat/FSM claim planned task，按可配置并发度执行 `export -> import -> delete`，并把 task/plan 标记为 `running/done/failed`；默认并发为 1，`--control-migration-max-parallel-tasks` 可提高并发，同一批任务会按 source/target node 冲突拆成多个 wave，避免同一 DataNode 被多个迁移任务同时读写；
-- DataNode 会缓存 control snapshot 并在 primary `Set/Delete/Touch/Adjust/Primitive` 及对应 mutating batch 成功后按 route replicas 进行 best-effort 异步写后复制；复制不阻塞 primary ack，并通过有界 dispatcher queue 串行发送、内存退避重试，避免异步复制乱序并覆盖短暂发送失败；admin summary 会暴露 queue/drop/retry/sequence/success/failure 等复制观测指标；
+- DataNode 会缓存 control snapshot 并在 primary `Set/Delete/Touch/Adjust/Primitive` 及对应 mutating batch 成功后按 route replicas 进行 best-effort 异步写后复制；复制不阻塞 primary ack，复制任务已从闭包发送改为显式 wire command，并通过有界 dispatcher queue 串行发送、内存退避重试，避免异步复制乱序并覆盖短暂发送失败；配置 `--node-replication-outbox-path` 后 primary 会把复制 command append 到本地 JSONL outbox，启动时扫描 outbox 以恢复 sequence 进度，并在发送成功后把 per-replica ack offset 持久化到 `<outbox>.acks.json` sidecar；admin summary 会暴露 queue/drop/retry/outbox/ack/sequence/success/failure 等复制观测指标；
 - DataNode memory engine 支持本地 snapshot/restore，并可通过 `--node-snapshot-path` 做进程重启恢复；同时支持 `--node-snapshot-interval` 周期持久化快照（0 禁用）；这是本地持久化基础，不等价于副本复制；
 - Go SDK 已放在 `sdk/go`，通过 go work 参与多子包开发；Java SDK 已放在 `sdk/java`，使用 Gradle Kotlin DSL、wrapper、version catalog、Lombok plugin、JPMS，并带 direct TCP/wire smoke 覆盖。
 
@@ -1019,7 +1019,7 @@ primary -> replica async replication
 - primary ack 优先低延迟
 - replica 落后通过 replication offset 追赶
 - primary 故障后由控制面更新 route table
-- control snapshot route 使用 `node_id/addr` 表示 primary，`replicas` 表示同一 vslot 范围的异步复制目标；当前实现已接入 primary `Set/Delete/Touch/Adjust/Primitive` 及 mutating batch 成功后的 best-effort 异步写后复制，并由有界 dispatcher queue 保序发送、内存重试和 admin stats 观测 replication sequence 进度，durable offset catch-up 后续接入。
+- control snapshot route 使用 `node_id/addr` 表示 primary，`replicas` 表示同一 vslot 范围的异步复制目标；当前实现已接入 primary `Set/Delete/Touch/Adjust/Primitive` 及 mutating batch 成功后的 best-effort 异步写后复制，并由显式 replication command、有界 dispatcher queue、可选本地 JSONL outbox、outbox 启动扫描恢复 sequence、per-replica ack offset sidecar、保序发送、内存重试和 admin stats 观测 replication sequence 进度组成，restart replay 和 durable catch-up 后续接入。
 
 不做：
 
