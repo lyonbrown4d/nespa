@@ -14,10 +14,10 @@ func (s *Server) handleBatchSet(ctx context.Context, frame protocol.Frame) proto
 	}
 	records, err := s.service.BatchSet(ctx, batchSetRequests(request.Items))
 	if err != nil {
-		s.replicateBatchSet(ctx, request, records)
+		s.replicateBatchSet(request, records)
 		return cacheErrorFrame(frame, err)
 	}
-	s.replicateBatchSet(ctx, request, records)
+	s.replicateBatchSet(request, records)
 	return metadataFrame(frame, cachewire.EncodeBatchSetResponse(cachewire.BatchSetResponse{
 		Records: recordsFromSetResults(records),
 	}), nil)
@@ -48,10 +48,10 @@ func (s *Server) handleBatchDelete(ctx context.Context, frame protocol.Frame) pr
 	}
 	results, err := s.service.BatchDelete(ctx, batchDeleteRequests(request.Items))
 	if err != nil {
-		s.replicateBatchDelete(ctx, request, results)
+		s.replicateBatchDelete(request, results)
 		return cacheErrorFrame(frame, err)
 	}
-	s.replicateBatchDelete(ctx, request, results)
+	s.replicateBatchDelete(request, results)
 	return metadataFrame(frame, cachewire.EncodeBatchDeleteResponse(cachewire.BatchDeleteResponse{
 		Results: deleteResultsFromCache(results),
 	}), nil)
@@ -78,10 +78,10 @@ func (s *Server) handleBatchTouch(ctx context.Context, frame protocol.Frame) pro
 	}
 	results, err := s.service.BatchTouch(ctx, batchTouchRequests(request.Items))
 	if err != nil {
-		s.replicateBatchTouch(ctx, request, results)
+		s.replicateBatchTouch(request, results)
 		return cacheErrorFrame(frame, err)
 	}
-	s.replicateBatchTouch(ctx, request, results)
+	s.replicateBatchTouch(request, results)
 	return metadataFrame(frame, cachewire.EncodeBatchTouchResponse(cachewire.BatchTouchResponse{
 		Results: touchResultsFromCache(results),
 	}), nil)

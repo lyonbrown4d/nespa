@@ -18,7 +18,7 @@ func (s *Server) handlePrimitive(ctx context.Context, frame protocol.Frame) prot
 		return cacheErrorFrame(frame, err)
 	}
 	if result.Applied && cache.PrimitiveKind(request.Kind).Mutates() {
-		s.replicatePrimitive(ctx, request)
+		s.replicatePrimitive(request)
 	}
 	metadata, payload, err := cachewire.EncodePrimitiveResponse(primitiveResultFromCache(result))
 	if err != nil {
@@ -34,10 +34,10 @@ func (s *Server) handleBatchPrimitive(ctx context.Context, frame protocol.Frame)
 	}
 	results, err := s.service.BatchPrimitive(ctx, primitiveRequestsFromWire(request.Items))
 	if err != nil {
-		s.replicateBatchPrimitive(ctx, request, results)
+		s.replicateBatchPrimitive(request, results)
 		return cacheErrorFrame(frame, err)
 	}
-	s.replicateBatchPrimitive(ctx, request, results)
+	s.replicateBatchPrimitive(request, results)
 	response := cachewire.BatchPrimitiveResponse{Results: primitiveResultsFromCache(results)}
 	metadata, payload, err := cachewire.EncodeBatchPrimitiveResponse(response)
 	if err != nil {

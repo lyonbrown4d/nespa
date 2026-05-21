@@ -17,7 +17,7 @@ func TestAdminEndpointRegistersRoutes(t *testing.T) {
 		cacheSvc   cache.Service
 		controlSvc *control.ServiceRuntime
 	)
-	server.RegisterOnly(admin.NewSummaryEndpoint(admin.Config{}, cacheSvc, controlSvc, nil))
+	server.RegisterOnly(admin.NewSummaryEndpoint(admin.Config{}, cacheSvc, controlSvc, nil, nil))
 
 	if !server.HasRoute(http.MethodGet, "/v1/admin/summary") {
 		t.Fatal("route GET /v1/admin/summary was not registered")

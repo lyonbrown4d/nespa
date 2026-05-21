@@ -13,15 +13,15 @@ const defaultReplicationTimeout = time.Second
 
 type replicationRequest struct {
 	key  cachewire.Key
-	send func(context.Context, *Client, string) error
+	send replicationSend
 }
 
-func (s *Server) replicateSet(ctx context.Context, request cachewire.SetRequest) {
+func (s *Server) replicateSet(request cachewire.SetRequest) {
 	replicaRequest := request
 	replicaRequest.Value = append([]byte(nil), request.Value...)
 	replicaRequest.RouteEpoch = 0
 	replicaRequest.ExpectedVersion = 0
-	s.replicate(ctx, replicationRequest{
+	s.replicate(replicationRequest{
 		key: request.Key,
 		send: func(replicationCtx context.Context, client *Client, target string) error {
 			if _, err := client.Set(replicationCtx, target, replicaRequest); err != nil {
@@ -32,11 +32,11 @@ func (s *Server) replicateSet(ctx context.Context, request cachewire.SetRequest)
 	})
 }
 
-func (s *Server) replicateDelete(ctx context.Context, request cachewire.DeleteRequest) {
+func (s *Server) replicateDelete(request cachewire.DeleteRequest) {
 	replicaRequest := request
 	replicaRequest.RouteEpoch = 0
 	replicaRequest.ExpectedVersion = 0
-	s.replicate(ctx, replicationRequest{
+	s.replicate(replicationRequest{
 		key: request.Key,
 		send: func(replicationCtx context.Context, client *Client, target string) error {
 			if _, err := client.Delete(replicationCtx, target, replicaRequest); err != nil {
@@ -47,11 +47,11 @@ func (s *Server) replicateDelete(ctx context.Context, request cachewire.DeleteRe
 	})
 }
 
-func (s *Server) replicateTouch(ctx context.Context, request cachewire.TouchRequest) {
+func (s *Server) replicateTouch(request cachewire.TouchRequest) {
 	replicaRequest := request
 	replicaRequest.RouteEpoch = 0
 	replicaRequest.ExpectedVersion = 0
-	s.replicate(ctx, replicationRequest{
+	s.replicate(replicationRequest{
 		key: request.Key,
 		send: func(replicationCtx context.Context, client *Client, target string) error {
 			if _, err := client.Touch(replicationCtx, target, replicaRequest); err != nil {
@@ -62,11 +62,11 @@ func (s *Server) replicateTouch(ctx context.Context, request cachewire.TouchRequ
 	})
 }
 
-func (s *Server) replicateAdjust(ctx context.Context, request cachewire.AdjustRequest) {
+func (s *Server) replicateAdjust(request cachewire.AdjustRequest) {
 	replicaRequest := request
 	replicaRequest.RouteEpoch = 0
 	replicaRequest.ExpectedVersion = 0
-	s.replicate(ctx, replicationRequest{
+	s.replicate(replicationRequest{
 		key: request.Key,
 		send: func(replicationCtx context.Context, client *Client, target string) error {
 			if _, err := client.Adjust(replicationCtx, target, replicaRequest); err != nil {
@@ -77,9 +77,9 @@ func (s *Server) replicateAdjust(ctx context.Context, request cachewire.AdjustRe
 	})
 }
 
-func (s *Server) replicatePrimitive(ctx context.Context, request cachewire.PrimitiveRequest) {
+func (s *Server) replicatePrimitive(request cachewire.PrimitiveRequest) {
 	replicaRequest := replicaPrimitiveRequest(request)
-	s.replicate(ctx, replicationRequest{
+	s.replicate(replicationRequest{
 		key: request.Key,
 		send: func(replicationCtx context.Context, client *Client, target string) error {
 			if _, err := client.Primitive(replicationCtx, target, replicaRequest); err != nil {
@@ -90,7 +90,7 @@ func (s *Server) replicatePrimitive(ctx context.Context, request cachewire.Primi
 	})
 }
 
-func (s *Server) replicateBatchSet(ctx context.Context, request cachewire.BatchSetRequest, results []cache.SetResult) {
+func (s *Server) replicateBatchSet(request cachewire.BatchSetRequest, results []cache.SetResult) {
 	batches := make(map[string][]cachewire.SetRequest)
 	for index := range min(len(request.Items), len(results)) {
 		if !results[index].Found {
@@ -101,7 +101,7 @@ func (s *Server) replicateBatchSet(ctx context.Context, request cachewire.BatchS
 	}
 	for target, items := range batches {
 		replicaRequest := cachewire.BatchSetRequest{Items: items}
-		go s.sendReplica(ctx, target, func(replicationCtx context.Context, client *Client, target string) error {
+		s.replication.Enqueue(target, func(replicationCtx context.Context, client *Client, target string) error {
 			if _, err := client.BatchSet(replicationCtx, target, replicaRequest); err != nil {
 				return fmt.Errorf("replicate batch set: %w", err)
 			}
@@ -111,7 +111,6 @@ func (s *Server) replicateBatchSet(ctx context.Context, request cachewire.BatchS
 }
 
 func (s *Server) replicateBatchDelete(
-	ctx context.Context,
 	request cachewire.BatchDeleteRequest,
 	results []cache.DeleteResult,
 ) {
@@ -125,7 +124,7 @@ func (s *Server) replicateBatchDelete(
 	}
 	for target, items := range batches {
 		replicaRequest := cachewire.BatchDeleteRequest{Items: items}
-		go s.sendReplica(ctx, target, func(replicationCtx context.Context, client *Client, target string) error {
+		s.replication.Enqueue(target, func(replicationCtx context.Context, client *Client, target string) error {
 			if _, err := client.BatchDelete(replicationCtx, target, replicaRequest); err != nil {
 				return fmt.Errorf("replicate batch delete: %w", err)
 			}
@@ -134,7 +133,7 @@ func (s *Server) replicateBatchDelete(
 	}
 }
 
-func (s *Server) replicateBatchTouch(ctx context.Context, request cachewire.BatchTouchRequest, results []cache.TouchResult) {
+func (s *Server) replicateBatchTouch(request cachewire.BatchTouchRequest, results []cache.TouchResult) {
 	batches := make(map[string][]cachewire.TouchRequest)
 	for index := range min(len(request.Items), len(results)) {
 		if !results[index].Touched {
@@ -145,7 +144,7 @@ func (s *Server) replicateBatchTouch(ctx context.Context, request cachewire.Batc
 	}
 	for target, items := range batches {
 		replicaRequest := cachewire.BatchTouchRequest{Items: items}
-		go s.sendReplica(ctx, target, func(replicationCtx context.Context, client *Client, target string) error {
+		s.replication.Enqueue(target, func(replicationCtx context.Context, client *Client, target string) error {
 			if _, err := client.BatchTouch(replicationCtx, target, replicaRequest); err != nil {
 				return fmt.Errorf("replicate batch touch: %w", err)
 			}
@@ -155,7 +154,6 @@ func (s *Server) replicateBatchTouch(ctx context.Context, request cachewire.Batc
 }
 
 func (s *Server) replicateBatchPrimitive(
-	ctx context.Context,
 	request cachewire.BatchPrimitiveRequest,
 	results []cache.PrimitiveResult,
 ) {
@@ -169,7 +167,7 @@ func (s *Server) replicateBatchPrimitive(
 	}
 	for target, items := range batches {
 		replicaRequest := cachewire.BatchPrimitiveRequest{Items: items}
-		go s.sendReplica(ctx, target, func(replicationCtx context.Context, client *Client, target string) error {
+		s.replication.Enqueue(target, func(replicationCtx context.Context, client *Client, target string) error {
 			if _, err := client.BatchPrimitive(replicationCtx, target, replicaRequest); err != nil {
 				return fmt.Errorf("replicate batch primitive: %w", err)
 			}
@@ -178,8 +176,8 @@ func (s *Server) replicateBatchPrimitive(
 	}
 }
 
-func (s *Server) replicate(ctx context.Context, request replicationRequest) {
-	if s.replicaTargets == nil || s.replicationClient == nil {
+func (s *Server) replicate(request replicationRequest) {
+	if s.replicaTargets == nil || s.replication == nil {
 		return
 	}
 
@@ -190,20 +188,12 @@ func (s *Server) replicate(ctx context.Context, request replicationRequest) {
 
 	for index := range targets {
 		target := targets[index]
-		go s.sendReplica(ctx, target, request.send)
-	}
-}
-
-func (s *Server) sendReplica(ctx context.Context, target string, send func(context.Context, *Client, string) error) {
-	replicationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultReplicationTimeout)
-	defer cancel()
-	if err := send(replicationCtx, s.replicationClient, target); err != nil {
-		return
+		s.replication.Enqueue(target, request.send)
 	}
 }
 
 func addReplicaBatchItem[T any](s *Server, batches map[string][]T, key cachewire.Key, item T) {
-	if s.replicaTargets == nil || s.replicationClient == nil {
+	if s.replicaTargets == nil || s.replication == nil {
 		return
 	}
 	targets := s.replicaTargets(key)

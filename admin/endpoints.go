@@ -8,6 +8,7 @@ import (
 	"github.com/lyonbrown4d/nespa/cache"
 	"github.com/lyonbrown4d/nespa/controlapi"
 	"github.com/lyonbrown4d/nespa/runtime"
+	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
 )
 
 type Endpoint interface {
@@ -31,19 +32,31 @@ type summaryNodeProvider interface {
 	RouteEpoch() uint64
 }
 
-type summaryEndpoint struct {
-	cfg        Config
-	cacheSvc   summaryCacheProvider
-	controlSvc summaryControlProvider
-	nodeSvc    summaryNodeProvider
+type summaryReplicationProvider interface {
+	ReplicationStats() cachetcp.ReplicationStats
 }
 
-func NewSummaryEndpoint(cfg Config, cacheSvc summaryCacheProvider, controlSvc summaryControlProvider, nodeSvc summaryNodeProvider) Endpoint {
+type summaryEndpoint struct {
+	cfg            Config
+	cacheSvc       summaryCacheProvider
+	controlSvc     summaryControlProvider
+	nodeSvc        summaryNodeProvider
+	replicationSvc summaryReplicationProvider
+}
+
+func NewSummaryEndpoint(
+	cfg Config,
+	cacheSvc summaryCacheProvider,
+	controlSvc summaryControlProvider,
+	nodeSvc summaryNodeProvider,
+	replicationSvc summaryReplicationProvider,
+) Endpoint {
 	return &summaryEndpoint{
-		cfg:        cfg,
-		cacheSvc:   cacheSvc,
-		controlSvc: controlSvc,
-		nodeSvc:    nodeSvc,
+		cfg:            cfg,
+		cacheSvc:       cacheSvc,
+		controlSvc:     controlSvc,
+		nodeSvc:        nodeSvc,
+		replicationSvc: replicationSvc,
 	}
 }
 
@@ -72,6 +85,10 @@ func (e *summaryEndpoint) Summary(ctx context.Context, _ *runtime.EmptyInput) (*
 	if e.nodeSvc != nil {
 		nodeRouteEpoch = e.nodeSvc.RouteEpoch()
 	}
+	replication := ReplicationBody{}
+	if e.replicationSvc != nil {
+		replication = replicationBodyFromStats(e.replicationSvc.ReplicationStats())
+	}
 
 	return runtime.JSON(SummaryBody{
 		ControlAddr:        e.cfg.ControlAddr,
@@ -91,5 +108,23 @@ func (e *summaryEndpoint) Summary(ctx context.Context, _ *runtime.EmptyInput) (*
 		CacheTouchHits:     stats.TouchHits,
 		CacheTouchMisses:   stats.TouchMisses,
 		CacheEvictions:     stats.Evictions,
+		Replication:        replication,
 	}), nil
+}
+
+func replicationBodyFromStats(stats cachetcp.ReplicationStats) ReplicationBody {
+	return ReplicationBody{
+		QueueDepth:        stats.QueueDepth,
+		QueueCapacity:     stats.QueueCapacity,
+		Enqueued:          stats.Enqueued,
+		Dropped:           stats.Dropped,
+		Attempts:          stats.Attempts,
+		Successes:         stats.Successes,
+		Failures:          stats.Failures,
+		Retrying:          stats.Retrying,
+		ActiveTarget:      stats.ActiveTarget,
+		LastError:         stats.LastError,
+		LastErrorUnixMs:   stats.LastErrorUnixMs,
+		LastSuccessUnixMs: stats.LastSuccessUnixMs,
+	}
 }

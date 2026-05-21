@@ -174,14 +174,15 @@ func adminModule(enabled bool) dix.Module {
 	return dix.NewModule("admin",
 		dix.Disabled(!enabled),
 		dix.WithModuleProviders(
-			dix.Provider4[admin.Endpoint, admin.Config, cache.Service, *control.ServiceRuntime, *node.ServiceRuntime](
+			dix.Provider5[admin.Endpoint, admin.Config, cache.Service, *control.ServiceRuntime, *node.ServiceRuntime, *cachetcp.Server](
 				func(
 					cfg admin.Config,
 					cacheSvc cache.Service,
 					controlSvc *control.ServiceRuntime,
 					nodeSvc *node.ServiceRuntime,
+					tcpServer *cachetcp.Server,
 				) admin.Endpoint {
-					return admin.NewSummaryEndpoint(cfg, cacheSvc, controlSvc, nodeSvc)
+					return admin.NewSummaryEndpoint(cfg, cacheSvc, controlSvc, nodeSvc, tcpServer)
 				},
 				dix.Into[admin.Endpoint](dix.Order(10)),
 			),

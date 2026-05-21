@@ -26,7 +26,7 @@ type Server struct {
 	codec             *protocol.Codec
 	currentRouteEpoch func() uint64
 	replicaTargets    func(cachewire.Key) []string
-	replicationClient *Client
+	replication       *replicationDispatcher
 	fences            *rangeFenceSet
 
 	mu       sync.Mutex
@@ -43,7 +43,7 @@ func NewServer(cfg ServerConfig, service cache.Service) *Server {
 		codec:             protocol.NewCodec(),
 		currentRouteEpoch: cfg.CurrentRouteEpoch,
 		replicaTargets:    cfg.ReplicaTargets,
-		replicationClient: NewClient(),
+		replication:       newReplicationDispatcher(NewClient(), defaultReplicationTimeout, defaultReplicationQueueSize),
 		fences:            newRangeFenceSet(),
 	}
 }
@@ -55,6 +55,13 @@ func (s *Server) Addr() string {
 		return s.listener.Addr().String()
 	}
 	return s.addr
+}
+
+func (s *Server) ReplicationStats() ReplicationStats {
+	if s.replication == nil {
+		return ReplicationStats{}
+	}
+	return s.replication.Stats()
 }
 
 func (s *Server) Start(ctx context.Context, logger *slog.Logger) error {
@@ -94,6 +101,9 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	select {
 	case <-done:
+		if err := s.replication.Stop(ctx); err != nil {
+			return fmt.Errorf("stop cache tcp replication: %w", err)
+		}
 		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("stop cache tcp server: %w", ctx.Err())
@@ -208,7 +218,7 @@ func (s *Server) handleSet(ctx context.Context, frame protocol.Frame) protocol.F
 	}
 	if result.Found {
 		request.Value = value
-		s.replicateSet(ctx, request)
+		s.replicateSet(request)
 	}
 	return recordFrame(frame, result.Record, result.Found)
 }
@@ -240,7 +250,7 @@ func (s *Server) handleDelete(ctx context.Context, frame protocol.Frame) protoco
 		return cacheErrorFrame(frame, err)
 	}
 	if deleted && applied {
-		s.replicateDelete(ctx, request)
+		s.replicateDelete(request)
 	}
 	return metadataFrame(frame, cachewire.EncodeDeleteResponse(cachewire.DeleteResponse{Deleted: deleted && applied}), nil)
 }
@@ -267,7 +277,7 @@ func (s *Server) handleTouch(ctx context.Context, frame protocol.Frame) protocol
 		return cacheErrorFrame(frame, err)
 	}
 	if touched {
-		s.replicateTouch(ctx, request)
+		s.replicateTouch(request)
 	}
 	return metadataFrame(frame, cachewire.EncodeTouchResponse(cachewire.TouchResponse{Touched: touched}), nil)
 }
@@ -282,15 +292,7 @@ func (s *Server) handleAdjust(ctx context.Context, frame protocol.Frame) protoco
 		return cacheErrorFrame(frame, err)
 	}
 	if result.Found {
-		s.replicateAdjust(ctx, request)
+		s.replicateAdjust(request)
 	}
 	return recordFrame(frame, result.Record, result.Found)
-}
-
-func recordFrame(frame protocol.Frame, rec cache.Record, found bool) protocol.Frame {
-	if !found {
-		return metadataFrame(frame, cachewire.EncodeRecord(cachewire.Record{Found: false}), nil)
-	}
-	body := recordFromCache(rec, true)
-	return metadataFrame(frame, cachewire.EncodeRecord(body), rec.Value)
 }

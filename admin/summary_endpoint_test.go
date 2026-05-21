@@ -8,6 +8,7 @@ import (
 	"github.com/lyonbrown4d/nespa/cache"
 	"github.com/lyonbrown4d/nespa/controlapi"
 	"github.com/lyonbrown4d/nespa/runtime"
+	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
 )
 
 type fakeSummaryCacheService struct {
@@ -41,6 +42,14 @@ func (f fakeSummaryNodeService) RouteEpoch() uint64 {
 	return f.routeEpoch
 }
 
+type fakeSummaryReplicationService struct {
+	stats cachetcp.ReplicationStats
+}
+
+func (f fakeSummaryReplicationService) ReplicationStats() cachetcp.ReplicationStats {
+	return f.stats
+}
+
 type summaryEndpointForTest interface {
 	Summary(context.Context, *runtime.EmptyInput) (*runtime.JSONResponse[admin.SummaryBody], error)
 }
@@ -58,6 +67,7 @@ func TestSummaryReturnsRuntimeStats(t *testing.T) {
 
 	assertSummaryClusterStats(t, got.Body)
 	assertSummaryCacheStats(t, got.Body)
+	assertSummaryReplicationStats(t, got.Body)
 }
 
 func newSummaryEndpointForTest(t *testing.T) summaryEndpointForTest {
@@ -94,8 +104,30 @@ func newSummaryEndpointForTest(t *testing.T) summaryEndpointForTest {
 	nodeSvc := fakeSummaryNodeService{
 		routeEpoch: 7,
 	}
+	replicationSvc := fakeSummaryReplicationService{
+		stats: cachetcp.ReplicationStats{
+			QueueDepth:        2,
+			QueueCapacity:     16,
+			Enqueued:          5,
+			Dropped:           1,
+			Attempts:          7,
+			Successes:         4,
+			Failures:          3,
+			Retrying:          true,
+			ActiveTarget:      "127.0.0.1:7503",
+			LastError:         "dial failed",
+			LastErrorUnixMs:   1000,
+			LastSuccessUnixMs: 900,
+		},
+	}
 
-	endpoint, ok := admin.NewSummaryEndpoint(admin.Config{ControlAddr: "127.0.0.1:7401"}, cachedSvc, controlSvc, nodeSvc).(summaryEndpointForTest)
+	endpoint, ok := admin.NewSummaryEndpoint(
+		admin.Config{ControlAddr: "127.0.0.1:7401"},
+		cachedSvc,
+		controlSvc,
+		nodeSvc,
+		replicationSvc,
+	).(summaryEndpointForTest)
 	if !ok {
 		t.Fatal("summary endpoint does not expose Summary")
 	}
@@ -130,5 +162,39 @@ func assertSummaryCacheStats(t *testing.T, body admin.SummaryBody) {
 	}
 	if body.CacheGetRequests != 10 || body.CacheTouchMisses != 1 {
 		t.Fatalf("cache IO stats = %+v", body)
+	}
+}
+
+func assertSummaryReplicationStats(t *testing.T, body admin.SummaryBody) {
+	t.Helper()
+	assertSummaryReplicationQueueStats(t, body.Replication)
+	assertSummaryReplicationSendStats(t, body.Replication)
+	assertSummaryReplicationRetryStats(t, body.Replication)
+}
+
+func assertSummaryReplicationQueueStats(t *testing.T, body admin.ReplicationBody) {
+	t.Helper()
+	if body.QueueDepth != 2 || body.QueueCapacity != 16 {
+		t.Fatalf("replication queue stats = %+v", body)
+	}
+	if body.Enqueued != 5 || body.Dropped != 1 {
+		t.Fatalf("replication enqueue stats = %+v", body)
+	}
+}
+
+func assertSummaryReplicationSendStats(t *testing.T, body admin.ReplicationBody) {
+	t.Helper()
+	if body.Attempts != 7 || body.Successes != 4 || body.Failures != 3 {
+		t.Fatalf("replication send stats = %+v", body)
+	}
+}
+
+func assertSummaryReplicationRetryStats(t *testing.T, body admin.ReplicationBody) {
+	t.Helper()
+	if !body.Retrying || body.ActiveTarget != "127.0.0.1:7503" {
+		t.Fatalf("replication retry stats = %+v", body)
+	}
+	if body.LastError != "dial failed" || body.LastErrorUnixMs != 1000 {
+		t.Fatalf("replication last error stats = %+v", body)
 	}
 }
