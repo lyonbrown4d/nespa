@@ -73,6 +73,14 @@ func (s *replicationAckStore) Ack(target string, sequence uint64) error {
 	return nil
 }
 
+func (s *replicationAckStore) get(target string) (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	value, ok := s.offsets.Get(target)
+	return value, ok
+}
+
 func (s *replicationAckStore) Snapshot() replicationAckSnapshot {
 	if s == nil {
 		return replicationAckSnapshot{}

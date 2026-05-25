@@ -91,6 +91,63 @@ func TestClientServerResumesReplicationOutboxSequence(t *testing.T) {
 	requireReplicationAckOffset(t, outboxPath, target.Addr(), 8)
 }
 
+func TestClientServerReplaysPendingReplicationOutboxEntriesOnStart(t *testing.T) {
+	target, client := startCacheClientServer(t)
+	key := cachewire.Key{Namespace: "orders", Space: "session", Key: "replay-set"}
+	outboxPath := filepath.Join(t.TempDir(), "replication", "outbox.jsonl")
+	replayPayload := []byte("replayed")
+
+	writeReplicationOutboxEntry(t, outboxPath, replicationOutboxEntryForTest{
+		Sequence: 10,
+		Target:   target.Addr(),
+		Kind:     1,
+		Op:       protocol.OpCacheSet,
+		Metadata: cachewire.EncodeSetRequest(cachewire.SetRequest{
+			Key:              key,
+			NamespaceVersion: 2,
+			SpaceVersion:     3,
+			ExpectedVersion:  5,
+			TTLMillis:        30_000,
+		}),
+		Payload: replayPayload,
+	})
+
+	source := startCacheServer(t, cachetcp.ServerConfig{
+		Addr:                  "127.0.0.1:0",
+		ReplicationOutboxPath: outboxPath,
+		ReplicaTargets: func(in cachewire.Key) []string {
+			if sameWireKey(in, key) {
+				return []string{target.Addr()}
+			}
+			return nil
+		},
+	})
+
+	requireEventuallyWireValue(t, client, target.Addr(), key, string(replayPayload))
+	requireReplicationAckOffset(t, outboxPath, target.Addr(), 10)
+	requireEventuallyReplayedSequence(t, source, 10)
+}
+
+func requireEventuallyReplayedSequence(t *testing.T, server *cachetcp.Server, want uint64) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		stats := server.ReplicationStats()
+		if stats.Enqueued == 1 &&
+			stats.Attempts == 1 &&
+			stats.Successes == 1 &&
+			stats.LastQueuedSequence == want &&
+			stats.LastAttemptSequence == want &&
+			stats.LastSuccessSequence == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	last := server.ReplicationStats()
+	t.Fatalf("replication replay stats = %+v, want sequence %d", last, want)
+}
+
 func requireReplicationOutboxEntry(t *testing.T, path string) replicationOutboxEntryForTest {
 	t.Helper()
 	entries := requireReplicationOutboxEntries(t, path, 1)
@@ -187,16 +244,25 @@ func replicationOutboxPathForTest(path string) (string, string) {
 
 func writeReplicationOutboxSeed(t *testing.T, path string, sequence uint64) {
 	t.Helper()
+	writeReplicationOutboxEntry(t, path, replicationOutboxEntryForTest{Sequence: sequence})
+}
+
+func writeReplicationOutboxEntry(
+	t *testing.T,
+	path string,
+	entry replicationOutboxEntryForTest,
+) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatalf("create outbox seed dir: %v", err)
 	}
-	raw, err := json.Marshal(replicationOutboxEntryForTest{Sequence: sequence})
+	raw, err := json.Marshal(entry)
 	if err != nil {
-		t.Fatalf("encode outbox seed: %v", err)
+		t.Fatalf("encode outbox entry: %v", err)
 	}
 	raw = append(raw, '\n')
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatalf("write outbox seed: %v", err)
+		t.Fatalf("write outbox entry: %v", err)
 	}
 }
 

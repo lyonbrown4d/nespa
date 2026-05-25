@@ -62,6 +62,60 @@ func scanReplicationOutbox(path string) (replicationOutboxSnapshot, error) {
 	return readReplicationOutboxSnapshot(file)
 }
 
+func scanReplicationOutboxEntries(path string) ([]replicationOutboxEntry, error) {
+	dir, name, err := replicationOutboxDirAndName(path)
+	if err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open replication outbox directory: %w", err)
+	}
+	defer closeReplicationOutboxRoot(root)
+
+	file, err := root.Open(name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open replication outbox for scan: %w", err)
+	}
+	defer closeReplicationOutboxFile(file)
+
+	return readReplicationOutboxEntries(file)
+}
+
+func readReplicationOutboxEntries(reader io.Reader) ([]replicationOutboxEntry, error) {
+	decoder := json.NewDecoder(reader)
+	entries := make([]replicationOutboxEntry, 0)
+	for {
+		var entry replicationOutboxEntry
+		err := decoder.Decode(&entry)
+		if errors.Is(err, io.EOF) {
+			return entries, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("decode replication outbox entry: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+}
+
+func replayableReplicationOutboxSnapshot(entries []replicationOutboxEntry) replicationOutboxSnapshot {
+	var snapshot replicationOutboxSnapshot
+	for index := range entries {
+		entry := entries[index]
+		snapshot.entries++
+		if entry.Sequence > snapshot.maxSequence {
+			snapshot.maxSequence = entry.Sequence
+		}
+	}
+	return snapshot
+}
+
 func openReplicationOutbox(path string) (*replicationOutbox, error) {
 	dir, name, err := replicationOutboxDirAndName(path)
 	if err != nil {

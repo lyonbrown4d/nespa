@@ -92,32 +92,25 @@ func (d *replicationDispatcher) Enqueue(target string, command replicationComman
 	if target == "" || !command.valid() {
 		return
 	}
-	select {
-	case <-d.ctx.Done():
-		return
-	default:
-	}
 
 	sequence := d.nextReplicationSequence()
 	d.appendOutbox(sequence, target, command)
-	select {
-	case <-d.ctx.Done():
-		return
-	case d.jobs <- replicationJob{sequence: sequence, target: target, command: command}:
-		d.recordEnqueued(sequence)
-	default:
-		d.recordDropped(sequence)
-	}
+	d.enqueueReplicationJob(replicationJob{
+		sequence: sequence,
+		target:   target,
+		command:  command,
+	})
 }
 
 func (d *replicationDispatcher) OpenOutbox(path string) error {
 	if !replicationOutboxEnabled(path) {
 		return nil
 	}
-	snapshot, err := scanReplicationOutbox(path)
+	entries, err := scanReplicationOutboxEntries(path)
 	if err != nil {
 		return err
 	}
+	snapshot := replayableReplicationOutboxSnapshot(entries)
 	outbox, err := openReplicationOutbox(path)
 	if err != nil {
 		return err
@@ -130,6 +123,7 @@ func (d *replicationDispatcher) OpenOutbox(path string) error {
 	d.acks = acks
 	d.restoreOutboxSnapshot(snapshot)
 	d.restoreAckSnapshot(acks.Snapshot())
+	d.replayOutbox(entries)
 	return nil
 }
 
@@ -164,6 +158,31 @@ func (d *replicationDispatcher) run() {
 	}
 }
 
+func (d *replicationDispatcher) replayOutbox(entries []replicationOutboxEntry) {
+	if len(entries) == 0 || d.acks == nil {
+		return
+	}
+
+	for index := range entries {
+		entry := entries[index]
+		if entry.Sequence == 0 || entry.Target == "" {
+			continue
+		}
+		if acknowledged, ok := d.acks.get(entry.Target); ok && entry.Sequence <= acknowledged {
+			continue
+		}
+		command, err := replicationCommandFromOutboxEntry(entry)
+		if err != nil {
+			continue
+		}
+		d.enqueueReplicationJob(replicationJob{
+			sequence: entry.Sequence,
+			target:   entry.Target,
+			command:  command,
+		})
+	}
+}
+
 func (d *replicationDispatcher) send(job replicationJob) {
 	delay := d.retryInitialDelay
 	for {
@@ -181,6 +200,22 @@ func (d *replicationDispatcher) send(job replicationJob) {
 			return
 		}
 		delay = nextReplicationRetryDelay(delay, d.retryMaxDelay)
+	}
+}
+
+func (d *replicationDispatcher) enqueueReplicationJob(job replicationJob) {
+	select {
+	case <-d.ctx.Done():
+		return
+	default:
+	}
+	select {
+	case <-d.ctx.Done():
+		return
+	case d.jobs <- job:
+		d.recordEnqueued(job.sequence)
+	default:
+		d.recordDropped(job.sequence)
 	}
 }
 
