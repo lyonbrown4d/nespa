@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -128,6 +129,49 @@ func TestClientServerReplaysPendingReplicationOutboxEntriesOnStart(t *testing.T)
 	requireEventuallyReplayedSequence(t, source, 10)
 }
 
+func TestClientServerCatchesUpDroppedReplicationWritesFromOutboxReplay(t *testing.T) {
+	targetAddr := reserveTCPAddr(t)
+	outboxPath := filepath.Join(t.TempDir(), "replication", "outbox.jsonl")
+	client := cachetcp.NewClient()
+	const keyCount = 8
+
+	source := startCacheServer(t, cachetcp.ServerConfig{
+		Addr:                  "127.0.0.1:0",
+		ReplicationOutboxPath: outboxPath,
+		ReplicationQueueSize:  1,
+		ReplicaTargets: func(in cachewire.Key) []string {
+			if in.Namespace == "orders" && in.Space == "session" {
+				return []string{targetAddr}
+			}
+			return nil
+		},
+	})
+
+	keys := make([]cachewire.Key, 0, keyCount)
+	for index := 0; index < keyCount; index++ {
+		key := cachewire.Key{
+			Namespace: "orders",
+			Space:     "session",
+			Key:       fmt.Sprintf("catchup-%d", index),
+		}
+		keys = append(keys, key)
+		if _, err := client.Set(t.Context(), source.Addr(), cachewire.SetRequest{
+			Key:   key,
+			Value: []byte(fmt.Sprintf("value-%d", index)),
+		}); err != nil {
+			t.Fatalf("set source key %q: %v", key.Key, err)
+		}
+	}
+
+	requireEventuallyDroppedReplications(t, source, 1)
+
+	replica := startCacheServer(t, cachetcp.ServerConfig{Addr: targetAddr})
+	for index := range keys {
+		requireEventuallyWireValue(t, client, replica.Addr(), keys[index], fmt.Sprintf("value-%d", index))
+	}
+	requireReplicationAckOffset(t, outboxPath, targetAddr, keyCount)
+}
+
 func requireEventuallyReplayedSequence(t *testing.T, server *cachetcp.Server, want uint64) {
 	t.Helper()
 
@@ -218,6 +262,34 @@ func requireReplicationAckOffset(t *testing.T, outboxPath, target string, want u
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("replication ack offsets = %+v error = %v, want %s:%d", last, lastErr, target, want)
+}
+
+func requireEventuallyDroppedReplications(t *testing.T, server *cachetcp.Server, want uint64) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		stats := server.ReplicationStats()
+		if stats.Dropped >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	last := server.ReplicationStats()
+	t.Fatalf("replication dropped = %d, want >= %d", last.Dropped, want)
+}
+
+func reserveTCPAddr(t *testing.T) string {
+	t.Helper()
+
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve addr: %v", err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatalf("release reserved addr: %v", err)
+	}
+	return listener.Addr().String()
 }
 
 func readReplicationAckState(outboxPath string) (replicationAckStateForTest, error) {

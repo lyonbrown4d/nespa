@@ -9,6 +9,7 @@ import (
 
 const (
 	defaultReplicationQueueSize         = 1024
+	defaultReplicationReplayInterval    = 250 * time.Millisecond
 	defaultReplicationRetryInitialDelay = 25 * time.Millisecond
 	defaultReplicationRetryMaxDelay     = 500 * time.Millisecond
 )
@@ -65,6 +66,8 @@ type replicationDispatcher struct {
 	nextSequence uint64
 	outbox       *replicationOutbox
 	acks         *replicationAckStore
+	outboxPath   string
+	queued       map[string]uint64
 }
 
 func newReplicationDispatcher(client *Client, timeout time.Duration, queueSize int) *replicationDispatcher {
@@ -83,6 +86,7 @@ func newReplicationDispatcher(client *Client, timeout time.Duration, queueSize i
 		jobs:              make(chan replicationJob, queueSize),
 		ctx:               ctx,
 		cancel:            cancel,
+		queued:            map[string]uint64{},
 	}
 	dispatcher.wg.Go(dispatcher.run)
 	return dispatcher
@@ -106,6 +110,7 @@ func (d *replicationDispatcher) OpenOutbox(path string) error {
 	if !replicationOutboxEnabled(path) {
 		return nil
 	}
+	d.outboxPath = path
 	entries, err := scanReplicationOutboxEntries(path)
 	if err != nil {
 		return err
@@ -148,14 +153,31 @@ func (d *replicationDispatcher) Stop(ctx context.Context) error {
 }
 
 func (d *replicationDispatcher) run() {
+	replayTicker := time.NewTicker(defaultReplicationReplayInterval)
+	defer replayTicker.Stop()
+
 	for {
 		select {
 		case <-d.ctx.Done():
 			return
+		case <-replayTicker.C:
+			d.replayOutboxFromDisk()
 		case job := <-d.jobs:
 			d.send(job)
 		}
 	}
+}
+
+func (d *replicationDispatcher) replayOutboxFromDisk() {
+	if len(d.outboxPath) == 0 || d.outbox == nil || d.acks == nil {
+		return
+	}
+	entries, err := scanReplicationOutboxEntries(d.outboxPath)
+	if err != nil {
+		d.recordReplayError(err)
+		return
+	}
+	d.replayOutbox(entries)
 }
 
 func (d *replicationDispatcher) replayOutbox(entries []replicationOutboxEntry) {
@@ -168,18 +190,52 @@ func (d *replicationDispatcher) replayOutbox(entries []replicationOutboxEntry) {
 		if entry.Sequence == 0 || entry.Target == "" {
 			continue
 		}
-		if acknowledged, ok := d.acks.get(entry.Target); ok && entry.Sequence <= acknowledged {
-			continue
+		if d.shouldReplay(entry) {
+			command, err := replicationCommandFromOutboxEntry(entry)
+			if err != nil {
+				continue
+			}
+			d.enqueueReplicationJob(replicationJob{
+				sequence: entry.Sequence,
+				target:   entry.Target,
+				command:  command,
+			})
 		}
-		command, err := replicationCommandFromOutboxEntry(entry)
-		if err != nil {
-			continue
-		}
-		d.enqueueReplicationJob(replicationJob{
-			sequence: entry.Sequence,
-			target:   entry.Target,
-			command:  command,
-		})
+	}
+}
+
+func (d *replicationDispatcher) shouldReplay(entry replicationOutboxEntry) bool {
+	if entry.Sequence == 0 || entry.Target == "" {
+		return false
+	}
+	if acknowledged, ok := d.acks.get(entry.Target); ok && entry.Sequence <= acknowledged {
+		return false
+	}
+	if queued, ok := d.queuedTargetHighWater(entry.Target); ok && entry.Sequence <= queued {
+		return false
+	}
+	return true
+}
+
+func (d *replicationDispatcher) queuedTargetHighWater(target string) (uint64, bool) {
+	if target == "" {
+		return 0, false
+	}
+	d.statsMu.Lock()
+	defer d.statsMu.Unlock()
+	sequence, ok := d.queued[target]
+	return sequence, ok
+}
+
+func (d *replicationDispatcher) recordQueued(sequence uint64, target string) {
+	if target == "" || sequence == 0 {
+		return
+	}
+	d.statsMu.Lock()
+	defer d.statsMu.Unlock()
+	current, ok := d.queued[target]
+	if !ok || sequence > current {
+		d.queued[target] = sequence
 	}
 }
 
@@ -214,6 +270,7 @@ func (d *replicationDispatcher) enqueueReplicationJob(job replicationJob) {
 		return
 	case d.jobs <- job:
 		d.recordEnqueued(job.sequence)
+		d.recordQueued(job.sequence, job.target)
 	default:
 		d.recordDropped(job.sequence)
 	}
@@ -243,4 +300,15 @@ func nextReplicationRetryDelay(current, maxDelay time.Duration) time.Duration {
 		return maxDelay
 	}
 	return next
+}
+
+func (d *replicationDispatcher) recordReplayError(err error) {
+	if err == nil {
+		return
+	}
+
+	d.statsMu.Lock()
+	d.stats.LastError = err.Error()
+	d.stats.LastErrorUnixMs = time.Now().UnixMilli()
+	d.statsMu.Unlock()
 }

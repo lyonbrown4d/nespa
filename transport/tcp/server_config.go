@@ -11,16 +11,21 @@ type ServerConfig struct {
 	CurrentRouteEpoch     func() uint64
 	ReplicaTargets        func(cachewire.Key) []string
 	ReplicationOutboxPath string
+	ReplicationQueueSize  int
 }
 
 func NewServer(cfg ServerConfig, service cache.Service) *Server {
+	replicationQueueSize := defaultReplicationQueueSize
+	if cfg.ReplicationQueueSize > 0 {
+		replicationQueueSize = cfg.ReplicationQueueSize
+	}
 	return &Server{
 		addr:              cfg.Addr,
 		service:           service,
 		codec:             protocol.NewCodec(),
 		currentRouteEpoch: cfg.CurrentRouteEpoch,
 		replicaTargets:    cfg.ReplicaTargets,
-		replication:       newReplicationDispatcher(NewClient(), defaultReplicationTimeout, defaultReplicationQueueSize),
+		replication:       newReplicationDispatcher(NewClient(), defaultReplicationTimeout, replicationQueueSize),
 		replicationOutbox: cfg.ReplicationOutboxPath,
 		fences:            newRangeFenceSet(),
 	}
