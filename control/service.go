@@ -107,6 +107,11 @@ func (s *ServiceRuntime) Heartbeat(ctx context.Context, nodeID, addr string) (co
 	return result.Heartbeat, err
 }
 
+func (s *ServiceRuntime) RemoveNode(ctx context.Context, nodeID string) (controlapi.RemoveNodeResponse, error) {
+	result, err := s.apply(ctx, Command{Type: CommandRemoveNode, NodeID: nodeID})
+	return result.RemoveNode, err
+}
+
 func (s *ServiceRuntime) Namespaces() controlapi.NamespacesBody {
 	return s.state.Namespaces()
 }
@@ -151,8 +156,22 @@ func controlStateError(message string, err error) error {
 	switch {
 	case hasControlOopsCode(err, "namespace_not_found", "space_not_found"):
 		return httpx.NewError(http.StatusNotFound, message, err)
-	case hasControlOopsCode(err, "invalid_node", "invalid_namespace", "invalid_space", "invalid_entity"):
+	case hasControlOopsCode(err, "control_raft_not_available", "control_raft_operation_failed"):
+		return httpx.NewError(http.StatusServiceUnavailable, message, err)
+	case hasControlOopsCode(
+		err,
+		"invalid_node",
+		"invalid_namespace",
+		"invalid_space",
+		"invalid_entity",
+		"control_raft_node_invalid",
+		"control_raft_member_invalid",
+		"control_raft_invalid_member",
+		"control_raft_invalid_addr",
+	):
 		return httpx.NewError(http.StatusBadRequest, message, err)
+	case hasControlOopsCode(err, "node_not_found"):
+		return httpx.NewError(http.StatusNotFound, message, err)
 	default:
 		return httpx.NewError(http.StatusInternalServerError, message, err)
 	}

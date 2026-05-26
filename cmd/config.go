@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/arcgolabs/configx"
@@ -9,6 +12,7 @@ import (
 	"github.com/lyonbrown4d/nespa/control"
 	"github.com/lyonbrown4d/nespa/frontend"
 	"github.com/lyonbrown4d/nespa/node"
+	rediscompat "github.com/lyonbrown4d/nespa/transport/redis"
 	"github.com/spf13/pflag"
 )
 
@@ -30,6 +34,8 @@ func addServerFlags(flags *pflag.FlagSet) {
 	flags.Uint64("control-raft-cluster-id", 1, "control-plane Dragonboat cluster ID")
 	flags.Uint64("control-raft-node-id", 1, "control-plane Dragonboat node ID")
 	flags.Duration("control-raft-proposal-timeout", 5*time.Second, "control-plane Dragonboat proposal timeout")
+	flags.Bool("control-raft-join", false, "join an existing control-plane Dragonboat cluster instead of bootstrapping a new one")
+	flags.StringSlice("control-raft-members", nil, "initial Dragonboat members for the control-plane cluster as node_id=raft_addr, repeated or comma-separated")
 	flags.Duration("control-liveness-sweep-interval", 5*time.Second, "control-plane node liveness sweep interval")
 	flags.Duration("control-liveness-suspect-after", 15*time.Second, "mark data nodes suspect after this heartbeat age")
 	flags.Duration("control-liveness-dead-after", 30*time.Second, "mark data nodes dead after this heartbeat age")
@@ -40,6 +46,9 @@ func addServerFlags(flags *pflag.FlagSet) {
 	flags.Int("control-migration-max-parallel-tasks", 1, "maximum control-plane migration tasks to execute concurrently")
 	flags.Bool("frontend-enabled", false, "enable optional frontend webui/debug module")
 	flags.String("frontend-addr", "127.0.0.1:7402", "frontend HTTP listen address")
+	flags.Bool("redis-enabled", false, "enable Redis RESP compatibility service")
+	flags.String("redis-addr", "127.0.0.1:6379", "Redis RESP compatibility listen address")
+	flags.StringSlice("redis-users", nil, "Redis AUTH credentials in username=password form; repeat or comma separate")
 	flags.Bool("node-enabled", true, "enable data-node TCP service")
 	flags.String("node-addr", "127.0.0.1:7403", "data-node TCP listen address")
 	flags.String("node-id", "node-1", "data-node identifier")
@@ -62,8 +71,9 @@ func configModule(flags *pflag.FlagSet) dix.Module {
 				Defaults:  serverDefaults(),
 			}),
 			dix.ProviderErr1(loadServerConfig),
-			dix.Provider1(controlConfigFrom),
+			dix.ProviderErr1(controlConfigFrom),
 			dix.Provider1(frontendConfigFrom),
+			dix.Provider1(redisConfigFrom),
 			dix.Provider1(nodeConfigFrom),
 			dix.Provider1(adminConfigFrom),
 		),
@@ -80,6 +90,8 @@ func serverDefaults() map[string]any {
 		"control.raft.addr":                    "127.0.0.1:7601",
 		"control.raft.cluster.id":              uint64(1),
 		"control.raft.node.id":                 uint64(1),
+		"control.raft.join":                    false,
+		"control.raft.members":                 []string{},
 		"control.raft.proposal.timeout":        5 * time.Second,
 		"control.liveness.sweep.interval":      5 * time.Second,
 		"control.liveness.suspect.after":       15 * time.Second,
@@ -91,6 +103,9 @@ func serverDefaults() map[string]any {
 		"control.migration.max.parallel.tasks": 1,
 		"frontend.enabled":                     false,
 		"frontend.addr":                        "127.0.0.1:7402",
+		"redis.enabled":                        false,
+		"redis.addr":                           "127.0.0.1:6379",
+		"redis.users":                          []string{},
 		"node.enabled":                         true,
 		"node.addr":                            "127.0.0.1:7403",
 		"node.id":                              "node-1",
@@ -113,7 +128,64 @@ func loadServerConfig(source configSource) (serverConfig, error) {
 	)
 }
 
-func controlConfigFrom(cfg serverConfig) control.Config {
+func parseRaftMembers(raw []string) ([]control.RaftMember, error) {
+	members := make([]control.RaftMember, 0, len(raw))
+	for _, item := range raw {
+		member, ok, err := parseRaftMember(item)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		members = append(members, member)
+	}
+	return members, nil
+}
+
+func parseRaftMember(raw string) (control.RaftMember, bool, error) {
+	item := strings.TrimSpace(raw)
+	if item == "" {
+		return control.RaftMember{}, false, nil
+	}
+
+	parts := strings.SplitN(item, "=", 2)
+	if len(parts) != 2 {
+		return control.RaftMember{}, false, fmt.Errorf("invalid control raft member %q, expected node_id=addr", item)
+	}
+
+	nodeID, err := parseRaftMemberNodeID(item, parts[0])
+	if err != nil {
+		return control.RaftMember{}, false, err
+	}
+	addr := strings.TrimSpace(parts[1])
+	if addr == "" {
+		return control.RaftMember{}, false, fmt.Errorf("invalid control raft member %q: addr is required", item)
+	}
+
+	return control.RaftMember{
+		NodeID: nodeID,
+		Addr:   addr,
+	}, true, nil
+}
+
+func parseRaftMemberNodeID(item, rawNodeID string) (uint64, error) {
+	nodeID, err := strconv.ParseUint(strings.TrimSpace(rawNodeID), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid control raft member %q: %w", item, err)
+	}
+	if nodeID == 0 {
+		return 0, fmt.Errorf("invalid control raft member %q: node id must be > 0", item)
+	}
+	return nodeID, nil
+}
+
+func controlConfigFrom(cfg serverConfig) (control.Config, error) {
+	members, err := parseRaftMembers(cfg.Control.Raft.Members)
+	if err != nil {
+		return control.Config{}, err
+	}
+
 	return control.Config{
 		Addr:      cfg.Control.Addr,
 		ClusterID: cfg.Control.Cluster.ID,
@@ -137,15 +209,24 @@ func controlConfigFrom(cfg serverConfig) control.Config {
 			Addr:            cfg.Control.Raft.Addr,
 			ClusterID:       cfg.Control.Raft.Cluster.ID,
 			NodeID:          cfg.Control.Raft.Node.ID,
+			Join:            cfg.Control.Raft.Join,
+			Members:         members,
 			ProposalTimeout: cfg.Control.Raft.Proposal.Timeout,
 		},
-	}
+	}, nil
 }
 
 func frontendConfigFrom(cfg serverConfig) frontend.Config {
 	return frontend.Config{
 		Addr:        cfg.Frontend.Addr,
 		ControlAddr: cfg.Control.Addr,
+	}
+}
+
+func redisConfigFrom(cfg serverConfig) rediscompat.Config {
+	return rediscompat.Config{
+		Addr:  cfg.Redis.Addr,
+		Users: cfg.Redis.Users,
 	}
 }
 

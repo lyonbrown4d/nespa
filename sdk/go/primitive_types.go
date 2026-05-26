@@ -26,6 +26,16 @@ const (
 	PrimitiveListPopFront    = cachewire.PrimitiveListPopFront
 	PrimitiveListPopBack     = cachewire.PrimitiveListPopBack
 	PrimitiveListRange       = cachewire.PrimitiveListRange
+	PrimitiveBitmapSetBit    = cachewire.PrimitiveBitmapSetBit
+	PrimitiveBitmapGetBit    = cachewire.PrimitiveBitmapGetBit
+	PrimitiveBitmapBitCount  = cachewire.PrimitiveBitmapBitCount
+	PrimitiveHLLAdd          = cachewire.PrimitiveHLLAdd
+	PrimitiveHLLCount        = cachewire.PrimitiveHLLCount
+	PrimitiveHLLMerge        = cachewire.PrimitiveHLLMerge
+	PrimitiveHLLMembers      = cachewire.PrimitiveHLLMembers
+	PrimitiveGeoAdd          = cachewire.PrimitiveGeoAdd
+	PrimitiveGeoDist         = cachewire.PrimitiveGeoDist
+	PrimitiveGeoRadius       = cachewire.PrimitiveGeoRadius
 )
 
 type PrimitiveOptions struct {

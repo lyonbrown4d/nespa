@@ -76,6 +76,8 @@ type controlRaftConfig struct {
 	Addr     string                `mapstructure:"addr"`
 	Cluster  numericIdentityConfig `mapstructure:"cluster"`
 	Node     numericIdentityConfig `mapstructure:"node"`
+	Join     bool                  `mapstructure:"join"`
+	Members  []string              `mapstructure:"members"`
 	Proposal timeoutConfig         `mapstructure:"proposal"`
 }
 
@@ -108,9 +110,16 @@ type frontendConfig struct {
 	Addr    string `mapstructure:"addr"`
 }
 
+type redisConfig struct {
+	Enabled bool     `mapstructure:"enabled"`
+	Addr    string   `mapstructure:"addr"`
+	Users   []string `mapstructure:"users"`
+}
+
 type serverConfig struct {
 	Control  controlConfig  `mapstructure:"control"`
 	Frontend frontendConfig `mapstructure:"frontend"`
+	Redis    redisConfig    `mapstructure:"redis"`
 	Node     nodeConfig     `mapstructure:"node"`
 	Admin    endpointConfig `mapstructure:"admin"`
 }

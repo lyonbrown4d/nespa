@@ -206,6 +206,32 @@ func TestControlStateRejectsInvalidNodeIdentity(t *testing.T) {
 	}
 }
 
+func TestControlStateRemoveNode(t *testing.T) {
+	state := control.NewControlStateWithClock("test", func() time.Time { return time.Unix(123, 0) })
+	registerNode(t, state)
+
+	response, err := state.RemoveNode(t.Context(), "node-1")
+	if err != nil {
+		t.Fatalf("remove node: %v", err)
+	}
+	if response.Revision != 2 {
+		t.Fatalf("revision = %d, want 2", response.Revision)
+	}
+	if len(state.Snapshot().Nodes) != 0 {
+		t.Fatalf("nodes = %+v, want none", state.Snapshot().Nodes)
+	}
+	if len(state.Snapshot().Routes) != 0 {
+		t.Fatalf("routes = %d, want 0", len(state.Snapshot().Routes))
+	}
+}
+
+func TestControlStateRemoveNodeMissing(t *testing.T) {
+	state := control.NewControlState("test")
+	if _, err := state.RemoveNode(t.Context(), "node-1"); !errors.Is(err, control.ErrNodeNotFound) {
+		t.Fatalf("err = %v, want ErrNodeNotFound", err)
+	}
+}
+
 func registerNode(t *testing.T, state *control.ControlState) uint64 {
 	t.Helper()
 	return registerSpecificNode(t, state, "node-1", "127.0.0.1:7403")

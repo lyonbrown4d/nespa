@@ -10,6 +10,7 @@ import (
 )
 
 var ErrInvalidNode = oops.Code("invalid_node").In("control.node").New("control: invalid node")
+var ErrNodeNotFound = oops.Code("node_not_found").In("control.node").New("control: node not found")
 
 func validateNodeIdentity(nodeID, addr string) (string, string, error) {
 	nodeID, err := normalizeNodeID(nodeID)
@@ -21,6 +22,10 @@ func validateNodeIdentity(nodeID, addr string) (string, string, error) {
 		return "", "", err
 	}
 	return nodeID, addr, nil
+}
+
+func normalizeNodeIdentity(nodeID string) (string, error) {
+	return normalizeNodeID(nodeID)
 }
 
 func normalizeNodeID(nodeID string) (string, error) {

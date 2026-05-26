@@ -1,7 +1,7 @@
 # Nespa 分布式缓存平台设计文档
 
 > Draft v0.1
-> 更新时间：2026-05-16
+> 更新时间：2026-05-25
 > 目标读者：核心研发、平台研发、SRE、架构评审人员
 
 ---
@@ -10,7 +10,7 @@
 
 Nespa 是一个 **namespace-native、space-isolated、queryable、control-plane-driven** 的分布式缓存平台。
 
-它不是 Redis-compatible replacement，也不是传统 KV 数据库。Nespa 的核心目标是为多应用、多进程、多缓存域提供统一缓存运行时，并从根源上支持：
+它不是完整 Redis-compatible replacement，也不是传统 KV 数据库。Nespa 可以提供可选 Redis RESP 兼容入口，降低既有 Redis client 接入成本，但核心目标仍是为多应用、多进程、多缓存域提供统一缓存运行时，并从根源上支持：
 
 - 应用级 namespace 隔离
 - namespace 下的多个 cache space/database
@@ -42,14 +42,15 @@ Nespa 优先解决这些问题：
 - Query 必须 schema-first、index-first、scope-bound
 - 控制面强一致，缓存数据面可弱一致
 - 数据面内存优先，延迟优先
+- 可选 Redis RESP 兼容入口，解析后进入 Nespa service/primitive 数据模型
 
 ### 2.2 不做什么
 
 Nespa 第一阶段明确不做：
 
-- Redis 协议兼容
-- Redis 命令兼容
-- Redis Cluster 兼容
+- 完整 Redis-compatible replacement
+- Redis Cluster、Lua、Stream、PubSub、WATCH/Lua 事务等完整 Redis 生态兼容
+- 完整 Redis 命令矩阵
 - SQL 数据库能力
 - 跨 namespace 查询
 - 跨 space 查询
@@ -62,7 +63,7 @@ Nespa 第一阶段明确不做：
 
 ### 2.2.1 数据结构能力决策
 
-在 MVP 阶段，Nespa 不做 Redis 协议/命令兼容，也不完整复刻 Redis 数据结构矩阵。但为了降低业务方在常见缓存结构上的重复编解码成本，数据面保留一组小而稳定的原生 primitive collection op。
+在 MVP 阶段，Nespa 不做完整 Redis 命令/数据结构兼容，也不完整复刻 Redis 数据结构矩阵。但为了降低业务方在常见缓存结构上的重复编解码成本，数据面保留一组小而稳定的原生 primitive collection op。Redis RESP 兼容只作为可选入口，负责把支持范围内的 Redis client 请求转换为 Nespa service/primitive 操作。
 
 第一阶段支持：
 
@@ -72,12 +73,19 @@ Nespa 第一阶段明确不做：
 - Set：`SetAdd/SetRemove/SetContains/SetMembers`；
 - ScoredSet：`ScoredSetPut/ScoredSetRemove/ScoredSetRange`；
 - List：`ListPushFront/ListPushBack/ListPopFront/ListPopBack/ListRange`，列表元素保持二进制 value，不强制字符串化；
+- Bitmap：`BitmapSetBit/BitmapGetBit/BitmapBitCount`，第一版用 set-bit 集合表示，后续可替换为更紧凑 bitset；
+- HyperLogLog：`HLLAdd/HLLCount/HLLMerge/HLLMembers`，第一版以 hash set 表示基数，保留后续替换为近似寄存器实现的空间；
+- Geo：`GeoAdd/GeoDist/GeoRadius`，按 member 存储经纬度并返回距离排序结果；
 - BatchPrimitive：一次请求承载多种 primitive op，降低用户心智负担和网络往返。
+- Transaction：核心 cache service 提供事务回调入口，串行执行一组操作并复用 quota/ExpectedVersion/primitive admission；当前是单进程 service 级隔离语义，不是跨 node 两阶段提交。
 
 边界：
 
-- 不提供 Redis 协议、Redis 命令名、Redis Cluster、RESP 或 Redis client 兼容；
-- 不在第一阶段实现 Stream/Bitmap/HyperLogLog/Geo 等扩展结构；
+- Redis RESP 兼容入口是可选 ingress，不进入核心数据面；支持范围内的外部 Redis client 目标是只替换服务地址；
+- RESP 连接必须使用 `AUTH username password`；`username` 映射 Nespa namespace；
+- Redis DB 号通过 `SELECT` 映射为 Nespa space，例如 `SELECT 0` => `0-space`；
+- 当前 RESP 命令子集覆盖连接握手、String/Counter/Batch、Hash/Set/List/Sorted Set、Bitmap、HyperLogLog、Geo 和事务队列：`GET/SET/DEL/EXISTS/EXPIRE/TTL/INCR/DECR/INCRBY/DECRBY/MGET/MSET/TYPE`、`HSET/HGET/HDEL/HGETALL/HEXISTS/HLEN`、`SADD/SREM/SISMEMBER/SMEMBERS/SCARD`、`LPUSH/RPUSH/LPOP/RPOP/LRANGE/LLEN`、`ZADD/ZREM/ZRANGE/ZCARD`、`SETBIT/GETBIT/BITCOUNT`、`PFADD/PFCOUNT/PFMERGE`、`GEOADD/GEODIST/GEORADIUS`、`MULTI/EXEC/DISCARD`；
+- 不承诺完整 Redis Cluster、Lua、Stream、PubSub、WATCH 或完整 Redis 命令覆盖；
 - primitive collection 仍绑定 `namespace/space/entity/key` 地址模型，并共享 TTL、ExpectedVersion、namespace/space version、route_epoch、quota admission 和 batch 语义；
 - collection 值在 DataNode 内部使用 `collectionx` 二进制序列化；外部仍通过 Nespa TCP frame 暴露稳定协议，不暴露内部编码。首版 ListRange 使用 `start + limit + reverse` 语义，不引入 Redis LRANGE 的负索引兼容。
 
@@ -88,7 +96,8 @@ Nespa 第一阶段明确不做：
 - control/node/admin/frontend 可由同一 Go binary 按开关启动；frontend 只保留 route/debug/console 视图，不承载 cache HTTP gateway；
 - 数据热路径走 TCP binary protocol，已支持 KV、adjust、batch set/get/delete/exists/touch、primitive、batch primitive；
 - DataNode memory engine 已有 TTL、ExpectedVersion 乐观锁、namespace/space version 可见性、sampled eviction、namespace/space memory quota；
-- set、adjust、primitive 写入和 batch 写入已接入 quota admission，写前预估增长成本，不允许绕过 space/namespace quota；ExpectedVersion 未命中时不会提前触发 quota reject；
+- set、adjust、primitive 写入、batch 写入和 transaction callback 内部写入已接入 quota admission，写前预估增长成本，不允许绕过 space/namespace quota；ExpectedVersion 未命中时不会提前触发 quota reject；
+- primitive collection 已覆盖 Counter、Map、Set、ScoredSet、List、Bitmap、HyperLogLog、Geo；Redis RESP 入口已映射 Hash/Set/List/ZSet/Bitmap/HyperLogLog/Geo 和 `MULTI/EXEC/DISCARD`；
 - routed TCP client 会读取 control snapshot，按 vslot 直连 DataNode；batch set/get/delete/exists/touch/primitive 会按 route 分组，失败后刷新 snapshot 并只重试未完成组；
 - control 写路径默认通过 Dragonboat Raft proposal 驱动 FSM Apply，并使用 Dragonboat log/snapshot 做控制面恢复；`--control-snapshot-path` 只作为 JSON 导入/导出辅助；
 - control rebalance 除事件外已生成 migration plan，记录需要从 source node 迁移到 target node 的 namespace/space/vslot 范围；control snapshot 的 route 仍以 `node_id/addr` 表示 primary，同时携带 `replicas` 作为 DataNode async replication 的目标元数据；
@@ -377,7 +386,7 @@ fixed-width binary header + binary metadata + raw payload
 
 - 控制面写操作、Admin API、Console backend、debug、health 仍使用 HTTP/OpenAPI
 - 控制面 watch 第一阶段可以用 HTTP streaming 或 long polling；需要进入 hot path 时再承载到 TCP frame
-- 协议语义由 Nespa 自己定义，不追求 Redis/gRPC 兼容
+- 核心 frame 协议语义由 Nespa 自己定义；Redis RESP 只作为可选外部入口，解析后转换为 Nespa service/primitive 操作，不改变 TCP binary/DataNode 架构；不追求 gRPC 兼容
 
 ### 5.4 管理 API
 
@@ -498,7 +507,7 @@ github.com/arcgolabs/collectionx
 - Range / RangeSet / RangeMap
 - RingBuffer / PriorityQueue
 
-当前实现中，DataNode 基础 entry table、TTL、eviction 和 quota accounting 仍由 engine 自己管理；primitive Map/Set/ScoredSet/List 的集合表示与二进制序列化使用 `collectionx`，以避免手写容器和编码分叉。后续如果 primitive collection 成为极限热路径，再评估替换为专用结构。
+当前实现中，DataNode 基础 entry table、TTL、eviction 和 quota accounting 仍由 engine 自己管理；primitive Map/Set/ScoredSet/List/Bitmap/HyperLogLog/Geo 的集合表示与二进制序列化使用 `collectionx`，以避免手写容器和编码分叉。Bitmap 第一版用 set-bit 集合表达，HyperLogLog 第一版用 hash set 表达基数；后续如果 primitive collection 成为极限热路径，再评估替换为专用紧凑结构。
 
 ### 5.11 客户端基础能力
 
@@ -578,7 +587,7 @@ github.com/arcgolabs/kvx
 可选用于：
 
 - 和 Redis/Valkey 的迁移工具
-- 兼容层实验
+- 可选 Redis RESP 入口与兼容层实验
 - benchmark 对比
 
 不进入 Nespa 核心数据面。
@@ -1984,8 +1993,11 @@ sampled eviction
 Counter primitive op
 Map/Set/ScoredSet primitive ops
 List primitive ops
+Bitmap/HyperLogLog/Geo primitive ops
 BatchDelete/BatchExists/BatchTouch
 BatchPrimitive
+Service-level transaction callback
+Redis MULTI/EXEC/DISCARD queue
 async primary-replica replication
 Go SDK
 Java SDK direct TCP/wire foundation
@@ -2005,12 +2017,13 @@ OpenTelemetry tracing
 ### 18.2 暂不支持
 
 ```text
-Redis compatibility
+complete Redis compatibility
+Redis Cluster / Lua / Stream / PubSub / WATCH
 JOIN
 aggregation
 continuous query
 full-text search
-geo search
+query planner geo index search
 vector search
 delete by query
 per-shard data raft
@@ -2133,7 +2146,7 @@ multi-region deployment
 | Event Bus | eventx |
 | DSL | plano 作为 schema/control DSL |
 | Query | 自研 QueryAST + planner |
-| Redis compatibility | 不做 |
+| Redis compatibility | 可选 RESP 入口；不承诺完整 Redis |
 | Query 范围 | namespace/space/entity |
 | Full scan | 默认禁止 |
 
@@ -2178,7 +2191,7 @@ control-plane-driven
 
 第一阶段应保持边界克制：
 
-- 不兼容 Redis
+- 不做完整 Redis 兼容；只保留可选 RESP 入口
 - 不做 SQL engine
 - 不做跨 namespace 查询
 - 不做数据面强一致 Raft

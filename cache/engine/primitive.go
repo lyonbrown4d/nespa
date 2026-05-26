@@ -25,6 +25,16 @@ var primitiveHandlers = map[PrimitiveKind]primitiveHandler{
 	PrimitiveListPopFront:    (*shardWorker).applyListPopFront,
 	PrimitiveListPopBack:     (*shardWorker).applyListPopBack,
 	PrimitiveListRange:       (*shardWorker).applyListRange,
+	PrimitiveBitmapSetBit:    (*shardWorker).applyBitmapSetBit,
+	PrimitiveBitmapGetBit:    (*shardWorker).applyBitmapGetBit,
+	PrimitiveBitmapBitCount:  (*shardWorker).applyBitmapBitCount,
+	PrimitiveHLLAdd:          (*shardWorker).applyHLLAdd,
+	PrimitiveHLLCount:        (*shardWorker).applyHLLCount,
+	PrimitiveHLLMerge:        (*shardWorker).applyHLLMerge,
+	PrimitiveHLLMembers:      (*shardWorker).applyHLLMembers,
+	PrimitiveGeoAdd:          (*shardWorker).applyGeoAdd,
+	PrimitiveGeoDist:         (*shardWorker).applyGeoDist,
+	PrimitiveGeoRadius:       (*shardWorker).applyGeoRadius,
 }
 
 func (s *shardWorker) applyPrimitive(cmd shardCommand) shardResult {

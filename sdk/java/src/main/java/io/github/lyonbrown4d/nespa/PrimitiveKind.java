@@ -17,7 +17,17 @@ public enum PrimitiveKind {
     LIST_PUSH_BACK(14),
     LIST_POP_FRONT(15),
     LIST_POP_BACK(16),
-    LIST_RANGE(17);
+    LIST_RANGE(17),
+    BITMAP_SET_BIT(18),
+    BITMAP_GET_BIT(19),
+    BITMAP_BIT_COUNT(20),
+    HLL_ADD(21),
+    HLL_COUNT(22),
+    HLL_MERGE(23),
+    HLL_MEMBERS(24),
+    GEO_ADD(25),
+    GEO_DIST(26),
+    GEO_RADIUS(27);
 
     private final int code;
 

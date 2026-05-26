@@ -18,6 +18,7 @@ const (
 	CommandBumpSpace             CommandType = "bump_space"
 	CommandRegisterNode          CommandType = "register_node"
 	CommandHeartbeat             CommandType = "heartbeat"
+	CommandRemoveNode            CommandType = "remove_node"
 	CommandAdvanceNodeLiveness   CommandType = "advance_node_liveness"
 	CommandClaimMigrationTask    CommandType = "claim_migration_task"
 	CommandCutoverMigrationTask  CommandType = "cutover_migration_task"
@@ -51,6 +52,7 @@ type ApplyResult struct {
 	BumpSpace       controlapi.BumpSpaceVersionResponse     `json:"bump_space"`
 	RegisterNode    controlapi.RegisterNodeResponse         `json:"register_node"`
 	Heartbeat       controlapi.HeartbeatResponse            `json:"heartbeat"`
+	RemoveNode      controlapi.RemoveNodeResponse           `json:"remove_node"`
 	Liveness        LivenessResult                          `json:"liveness"`
 	MigrationTask   MigrationTaskResult                     `json:"migration_task"`
 }
@@ -69,6 +71,7 @@ var commandHandlers = map[CommandType]commandHandler{
 	CommandBumpSpace:             handleBumpSpaceCommand,
 	CommandRegisterNode:          handleRegisterNodeCommand,
 	CommandHeartbeat:             handleHeartbeatCommand,
+	CommandRemoveNode:            handleRemoveNodeCommand,
 	CommandAdvanceNodeLiveness:   handleAdvanceNodeLivenessCommand,
 	CommandClaimMigrationTask:    handleClaimMigrationTaskCommand,
 	CommandCutoverMigrationTask:  handleCutoverMigrationTaskCommand,
@@ -114,6 +117,10 @@ func handleRegisterNodeCommand(ctx context.Context, f *ControlFSM, command Comma
 
 func handleHeartbeatCommand(ctx context.Context, f *ControlFSM, command Command) (ApplyResult, error) {
 	return f.applyHeartbeat(ctx, command)
+}
+
+func handleRemoveNodeCommand(ctx context.Context, f *ControlFSM, command Command) (ApplyResult, error) {
+	return f.applyRemoveNode(ctx, command)
 }
 
 func handleAdvanceNodeLivenessCommand(ctx context.Context, f *ControlFSM, command Command) (ApplyResult, error) {
@@ -169,6 +176,11 @@ func (f *ControlFSM) applyRegisterNode(ctx context.Context, command Command) (Ap
 func (f *ControlFSM) applyHeartbeat(ctx context.Context, command Command) (ApplyResult, error) {
 	response, err := f.state.heartbeatAt(ctx, command.NodeID, command.Addr, f.commandTime(command))
 	return ApplyResult{Heartbeat: response}, err
+}
+
+func (f *ControlFSM) applyRemoveNode(ctx context.Context, command Command) (ApplyResult, error) {
+	response, err := f.state.RemoveNode(ctx, command.NodeID)
+	return ApplyResult{RemoveNode: response}, err
 }
 
 func (f *ControlFSM) applyAdvanceNodeLiveness(ctx context.Context, command Command) (ApplyResult, error) {

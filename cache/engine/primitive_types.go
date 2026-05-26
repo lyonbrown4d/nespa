@@ -22,6 +22,16 @@ const (
 	PrimitiveListPopFront
 	PrimitiveListPopBack
 	PrimitiveListRange
+	PrimitiveBitmapSetBit
+	PrimitiveBitmapGetBit
+	PrimitiveBitmapBitCount
+	PrimitiveHLLAdd
+	PrimitiveHLLCount
+	PrimitiveHLLMerge
+	PrimitiveHLLMembers
+	PrimitiveGeoAdd
+	PrimitiveGeoDist
+	PrimitiveGeoRadius
 )
 
 type PrimitiveOptions struct {
@@ -82,6 +92,11 @@ type ScoredMember struct {
 	Score  float64
 }
 
+type GeoPoint struct {
+	Longitude float64
+	Latitude  float64
+}
+
 func (k PrimitiveKind) Mutates() bool {
 	switch k {
 	case PrimitiveCounterAdjust,
@@ -94,14 +109,24 @@ func (k PrimitiveKind) Mutates() bool {
 		PrimitiveListPushFront,
 		PrimitiveListPushBack,
 		PrimitiveListPopFront,
-		PrimitiveListPopBack:
+		PrimitiveListPopBack,
+		PrimitiveBitmapSetBit,
+		PrimitiveHLLAdd,
+		PrimitiveHLLMerge,
+		PrimitiveGeoAdd:
 		return true
 	case PrimitiveMapGet,
 		PrimitiveMapGetAll,
 		PrimitiveSetContains,
 		PrimitiveSetMembers,
 		PrimitiveScoredSetRange,
-		PrimitiveListRange:
+		PrimitiveListRange,
+		PrimitiveBitmapGetBit,
+		PrimitiveBitmapBitCount,
+		PrimitiveHLLCount,
+		PrimitiveHLLMembers,
+		PrimitiveGeoDist,
+		PrimitiveGeoRadius:
 		return false
 	}
 	return false

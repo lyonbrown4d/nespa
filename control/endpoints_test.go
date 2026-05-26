@@ -16,6 +16,7 @@ func TestControlEndpointsRegisterRoutes(t *testing.T) {
 		control.NewReadEndpoint(svc),
 		control.NewCatalogEndpoint(svc),
 		control.NewNodeEndpoint(svc),
+		control.NewRaftEndpoint(svc),
 	)
 
 	for _, route := range controlEndpointRoutes() {
@@ -47,6 +48,10 @@ func controlEndpointRoutes() []struct {
 		{method: http.MethodPost, path: "/v1/control/entities"},
 		{method: http.MethodGet, path: "/v1/control/nodes"},
 		{method: http.MethodPost, path: "/v1/control/nodes"},
+		{method: http.MethodPost, path: "/v1/control/nodes/remove"},
 		{method: http.MethodPut, path: "/v1/control/nodes/heartbeat"},
+		{method: http.MethodGet, path: "/v1/control/raft/members"},
+		{method: http.MethodPost, path: "/v1/control/raft/members/add"},
+		{method: http.MethodPost, path: "/v1/control/raft/members/remove"},
 	}
 }

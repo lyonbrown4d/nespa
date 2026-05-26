@@ -129,6 +129,15 @@ type NodesBody struct {
 	Nodes    []NodeBody `json:"nodes"`
 }
 
+type RaftMemberBody struct {
+	NodeID uint64 `json:"node_id"`
+	Addr   string `json:"addr"`
+}
+
+type RaftMembersBody struct {
+	Members []RaftMemberBody `json:"members"`
+}
+
 type NamespacesBody struct {
 	Revision   uint64          `json:"revision"`
 	Namespaces []NamespaceBody `json:"namespaces"`
@@ -239,4 +248,44 @@ type HeartbeatBody struct {
 type HeartbeatResponse struct {
 	Revision uint64   `json:"revision"`
 	Node     NodeBody `json:"node"`
+}
+
+type RemoveNodeInput struct {
+	Body RemoveNodeBody
+}
+
+type RemoveNodeBody struct {
+	NodeID string `json:"node_id"`
+}
+
+type RemoveNodeResponse struct {
+	Revision uint64   `json:"revision"`
+	Node     NodeBody `json:"node"`
+}
+
+type AddRaftMemberInput struct {
+	Body AddRaftMemberBody
+}
+
+type AddRaftMemberBody struct {
+	NodeID uint64 `json:"node_id"`
+	Addr   string `json:"addr"`
+}
+
+type AddRaftMemberResponse struct {
+	Member  RaftMemberBody   `json:"member"`
+	Members []RaftMemberBody `json:"members"`
+}
+
+type RemoveRaftMemberInput struct {
+	Body RemoveRaftMemberBody
+}
+
+type RemoveRaftMemberBody struct {
+	NodeID uint64 `json:"node_id"`
+}
+
+type RemoveRaftMemberResponse struct {
+	NodeID  uint64           `json:"node_id"`
+	Members []RaftMemberBody `json:"members"`
 }

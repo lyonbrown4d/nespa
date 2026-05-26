@@ -16,6 +16,9 @@ const (
 	collectionKindSet
 	collectionKindScoredSet
 	collectionKindList
+	collectionKindBitmap
+	collectionKindHLL
+	collectionKindGeo
 )
 
 var collectionValuePrefix = []byte{'n', 's', 'p', 'a', 'c', '1'}
@@ -98,6 +101,66 @@ func decodeListCollection(raw []byte) (*collectionlist.List[[]byte], error) {
 		return nil, collectionSerializationError("decode list collection", err)
 	}
 	return values, nil
+}
+
+func encodeBitmapCollection(bits *collectionset.Set[int]) ([]byte, error) {
+	body, err := bits.MarshalBinary()
+	if err != nil {
+		return nil, collectionSerializationError("encode bitmap collection", err)
+	}
+	return encodeCollectionBody(collectionKindBitmap, body), nil
+}
+
+func decodeBitmapCollection(raw []byte) (*collectionset.Set[int], error) {
+	body, err := decodeCollectionBody(raw, collectionKindBitmap)
+	if err != nil {
+		return nil, err
+	}
+	bits := collectionset.NewSet[int]()
+	if err := bits.UnmarshalBinary(body); err != nil {
+		return nil, collectionSerializationError("decode bitmap collection", err)
+	}
+	return bits, nil
+}
+
+func encodeHLLCollection(hashes *collectionset.Set[string]) ([]byte, error) {
+	body, err := hashes.MarshalBinary()
+	if err != nil {
+		return nil, collectionSerializationError("encode hll collection", err)
+	}
+	return encodeCollectionBody(collectionKindHLL, body), nil
+}
+
+func decodeHLLCollection(raw []byte) (*collectionset.Set[string], error) {
+	body, err := decodeCollectionBody(raw, collectionKindHLL)
+	if err != nil {
+		return nil, err
+	}
+	hashes := collectionset.NewSet[string]()
+	if err := hashes.UnmarshalBinary(body); err != nil {
+		return nil, collectionSerializationError("decode hll collection", err)
+	}
+	return hashes, nil
+}
+
+func encodeGeoCollection(points *collectionmapping.Map[string, GeoPoint]) ([]byte, error) {
+	body, err := points.MarshalBinary()
+	if err != nil {
+		return nil, collectionSerializationError("encode geo collection", err)
+	}
+	return encodeCollectionBody(collectionKindGeo, body), nil
+}
+
+func decodeGeoCollection(raw []byte) (*collectionmapping.Map[string, GeoPoint], error) {
+	body, err := decodeCollectionBody(raw, collectionKindGeo)
+	if err != nil {
+		return nil, err
+	}
+	points := collectionmapping.NewMap[string, GeoPoint]()
+	if err := points.UnmarshalBinary(body); err != nil {
+		return nil, collectionSerializationError("decode geo collection", err)
+	}
+	return points, nil
 }
 
 func encodeCollectionBody(kind collectionKind, body []byte) []byte {

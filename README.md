@@ -219,11 +219,40 @@ optional JSON import/export helper. DataNode memory-engine snapshots can be
 restored/saved with `--node-snapshot-path`; this is a local persistence
 foundation, not yet a replicated data log.
 
-The data plane is intentionally a versioned binary KV and primitive collection
+The primary data plane remains a versioned binary KV and primitive collection
 plane. It supports `set/get/delete/exists/touch/adjust`, batch variants, and a
-small native primitive set for `counter`, `map`, `set`, `scored set`, and
-binary `list` values.
-Redis protocol, command, and cluster compatibility are not part of this stage.
+small native primitive set for `counter`, `map`, `set`, `scored set`, binary
+`list`, `bitmap`, `hyperloglog`, and `geo` values. The core cache service also
+has a transaction callback API that serializes a group of operations through the
+same service/quota/ExpectedVersion path; it is the current foundation for RESP
+`MULTI`/`EXEC`, not a cross-node two-phase transaction layer.
+
+Redis RESP compatibility is an optional ingress layer for client migration and
+deployment convenience, not the internal architecture. For the supported command
+subset, external Redis clients should only need to replace the server address.
+RESP connections must use `AUTH username password`; `username` maps to the
+Nespa namespace. Redis logical DB selection maps to Nespa space, for example
+`SELECT 0` maps to `0-space`. After RESP parsing, requests are translated into
+Nespa service/primitive operations and routed through the existing TCP
+binary/DataNode model.
+
+The current RESP command subset covers connection setup and the common
+non-stream data structures:
+
+- Connection: `AUTH`, `HELLO`, `PING`, `QUIT`, `SELECT`, `CLIENT`, `COMMAND`
+- String/counter/batch: `GET`, `SET`, `DEL`, `EXISTS`, `EXPIRE`, `TTL`,
+  `INCR`, `DECR`, `INCRBY`, `DECRBY`, `MGET`, `MSET`, `TYPE`
+- Hash: `HSET`, `HGET`, `HDEL`, `HGETALL`, `HEXISTS`, `HLEN`
+- Set: `SADD`, `SREM`, `SISMEMBER`, `SMEMBERS`, `SCARD`
+- List: `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LRANGE`, `LLEN`
+- Sorted set: `ZADD`, `ZREM`, `ZRANGE`, `ZCARD`
+- Bitmap: `SETBIT`, `GETBIT`, `BITCOUNT`
+- HyperLogLog: `PFADD`, `PFCOUNT`, `PFMERGE`
+- Geo: `GEOADD`, `GEODIST`, `GEORADIUS`
+- Transaction queue: `MULTI`, `EXEC`, `DISCARD`
+
+Compatibility boundary: Nespa does not promise complete Redis Cluster, Lua,
+Stream, PubSub, WATCH/Lua transaction, or full command compatibility.
 
 The public TCP client SDK lives in `client` and uses `transport/tcp` underneath.
 Use `client.NewTCP` for a direct single-node TCP client, or `client.NewRoutedTCP`

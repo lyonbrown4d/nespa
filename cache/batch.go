@@ -3,37 +3,38 @@ package cache
 import (
 	"context"
 	"fmt"
-
-	"github.com/lyonbrown4d/nespa/cache/engine"
 )
 
 func (s *EngineService) BatchSet(ctx context.Context, requests []SetRequest) ([]SetResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.batchSetLocked(ctx, requests)
+}
+
+func (s *EngineService) batchSetLocked(ctx context.Context, requests []SetRequest) ([]SetResult, error) {
 	records := make([]SetResult, 0, len(requests))
 	for _, request := range requests {
-		if err := s.admitSet(ctx, request.Key, request.Value, request.Options); err != nil {
+		result, err := s.setLocked(ctx, request.Key, request.Value, request.Options)
+		if err != nil {
 			return records, err
 		}
-		record, applied, err := s.engine.Set(ctx, request.Key, request.Value, engine.SetOptions{
-			TTL:              request.Options.TTL,
-			NamespaceVersion: request.Options.NamespaceVersion,
-			SpaceVersion:     request.Options.SpaceVersion,
-			ExpectedVersion:  request.Options.ExpectedVersion,
-		})
-		if err != nil {
-			return records, fmt.Errorf("set engine batch record: %w", err)
-		}
-		records = append(records, SetResult{Record: record, Found: applied})
+		records = append(records, result)
 	}
 	return records, nil
 }
 
 func (s *EngineService) BatchGet(ctx context.Context, requests []GetRequest) ([]GetResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.batchGetLocked(ctx, requests)
+}
+
+func (s *EngineService) batchGetLocked(ctx context.Context, requests []GetRequest) ([]GetResult, error) {
 	results := make([]GetResult, 0, len(requests))
 	for _, request := range requests {
-		record, found, err := s.Get(ctx, request.Key, request.Options)
+		record, found, err := s.getLocked(ctx, request.Key, request.Options)
 		if err != nil {
 			return results, err
 		}
@@ -46,9 +47,13 @@ func (s *EngineService) BatchDelete(ctx context.Context, requests []DeleteReques
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.batchDeleteLocked(ctx, requests)
+}
+
+func (s *EngineService) batchDeleteLocked(ctx context.Context, requests []DeleteRequest) ([]DeleteResult, error) {
 	results := make([]DeleteResult, 0, len(requests))
 	for index := range requests {
-		deleted, found, err := s.engine.Delete(ctx, requests[index].Key, engine.DeleteOptions{
+		deleted, found, err := s.deleteLocked(ctx, requests[index].Key, DeleteOptions{
 			ExpectedVersion: requests[index].ExpectedVersion,
 		})
 		if err != nil {
@@ -60,9 +65,16 @@ func (s *EngineService) BatchDelete(ctx context.Context, requests []DeleteReques
 }
 
 func (s *EngineService) BatchExists(ctx context.Context, requests []GetRequest) ([]ExistsResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.batchExistsLocked(ctx, requests)
+}
+
+func (s *EngineService) batchExistsLocked(ctx context.Context, requests []GetRequest) ([]ExistsResult, error) {
 	results := make([]ExistsResult, 0, len(requests))
 	for index := range requests {
-		exists, err := s.Exists(ctx, requests[index].Key, requests[index].Options)
+		exists, err := s.existsLocked(ctx, requests[index].Key, requests[index].Options)
 		if err != nil {
 			return results, err
 		}
@@ -72,9 +84,16 @@ func (s *EngineService) BatchExists(ctx context.Context, requests []GetRequest) 
 }
 
 func (s *EngineService) BatchTouch(ctx context.Context, requests []TouchRequest) ([]TouchResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.batchTouchLocked(ctx, requests)
+}
+
+func (s *EngineService) batchTouchLocked(ctx context.Context, requests []TouchRequest) ([]TouchResult, error) {
 	results := make([]TouchResult, 0, len(requests))
 	for index := range requests {
-		touched, err := s.Touch(ctx, requests[index].Key, requests[index].Options)
+		touched, err := s.touchLocked(ctx, requests[index].Key, requests[index].Options)
 		if err != nil {
 			return results, err
 		}
@@ -90,14 +109,20 @@ func (s *EngineService) BatchPrimitive(
 	if primitiveBatchMutates(requests) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		return s.batchPrimitiveLocked(ctx, requests)
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.batchPrimitiveLocked(ctx, requests)
+}
 
+func (s *EngineService) batchPrimitiveLocked(
+	ctx context.Context,
+	requests []PrimitiveRequest,
+) ([]PrimitiveResult, error) {
 	results := make([]PrimitiveResult, 0, len(requests))
 	for index := range requests {
-		if err := s.admitPrimitive(ctx, requests[index]); err != nil {
-			return results, err
-		}
-		result, err := s.executePrimitive(ctx, requests[index])
+		result, err := s.primitiveLocked(ctx, requests[index])
 		if err != nil {
 			return results, err
 		}

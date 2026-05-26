@@ -45,3 +45,20 @@ func TestControlFSMAdvancesLiveness(t *testing.T) {
 		t.Fatalf("liveness result = %+v", result.Liveness)
 	}
 }
+
+func TestControlFSMRemoveNode(t *testing.T) {
+	state := control.NewControlStateWithClock("test", func() time.Time { return time.Unix(123, 0) })
+	registerNode(t, state)
+	fsm := control.NewControlFSM(state)
+
+	result, err := fsm.Apply(t.Context(), control.Command{
+		Type:   control.CommandRemoveNode,
+		NodeID: "node-1",
+	})
+	if err != nil {
+		t.Fatalf("apply remove node: %v", err)
+	}
+	if result.RemoveNode.Revision != 2 {
+		t.Fatalf("revision = %d, want 2", result.RemoveNode.Revision)
+	}
+}

@@ -77,6 +77,8 @@ type DeleteOptions struct {
 	ExpectedVersion uint64
 }
 
+type TransactionFunc func(context.Context, Service) error
+
 type Service interface {
 	Set(context.Context, Key, []byte, SetOptions) (SetResult, error)
 	Get(context.Context, Key, GetOptions) (Record, bool, error)
@@ -91,6 +93,7 @@ type Service interface {
 	BatchDelete(context.Context, []DeleteRequest) ([]DeleteResult, error)
 	BatchExists(context.Context, []GetRequest) ([]ExistsResult, error)
 	BatchTouch(context.Context, []TouchRequest) ([]TouchResult, error)
+	Transaction(context.Context, TransactionFunc) error
 	Stats(context.Context) (Stats, error)
 	Evict(context.Context, EvictRequest) (EvictResult, error)
 	Export(context.Context, RangeOptions) (Snapshot, error)
@@ -147,7 +150,7 @@ type EvictRequest struct {
 type EngineService struct {
 	engine engine.Engine
 	quota  QuotaConfig
-	mu     sync.Mutex
+	mu     sync.RWMutex
 }
 
 type Option func(*EngineService)
@@ -170,6 +173,10 @@ func (s *EngineService) Set(ctx context.Context, key Key, value []byte, opts Set
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.setLocked(ctx, key, value, opts)
+}
+
+func (s *EngineService) setLocked(ctx context.Context, key Key, value []byte, opts SetOptions) (SetResult, error) {
 	if err := s.admitSet(ctx, key, value, opts); err != nil {
 		return SetResult{}, err
 	}
@@ -187,6 +194,13 @@ func (s *EngineService) Set(ctx context.Context, key Key, value []byte, opts Set
 }
 
 func (s *EngineService) Get(ctx context.Context, key Key, opts GetOptions) (Record, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.getLocked(ctx, key, opts)
+}
+
+func (s *EngineService) getLocked(ctx context.Context, key Key, opts GetOptions) (Record, bool, error) {
 	record, found, err := s.engine.Get(ctx, key, engine.GetOptions{
 		NamespaceVersion: opts.NamespaceVersion,
 		SpaceVersion:     opts.SpaceVersion,
@@ -201,6 +215,10 @@ func (s *EngineService) Delete(ctx context.Context, key Key, options DeleteOptio
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.deleteLocked(ctx, key, options)
+}
+
+func (s *EngineService) deleteLocked(ctx context.Context, key Key, options DeleteOptions) (bool, bool, error) {
 	deleted, applied, err := s.engine.Delete(ctx, key, engine.DeleteOptions{
 		ExpectedVersion: options.ExpectedVersion,
 	})
@@ -211,6 +229,13 @@ func (s *EngineService) Delete(ctx context.Context, key Key, options DeleteOptio
 }
 
 func (s *EngineService) Exists(ctx context.Context, key Key, opts GetOptions) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.existsLocked(ctx, key, opts)
+}
+
+func (s *EngineService) existsLocked(ctx context.Context, key Key, opts GetOptions) (bool, error) {
 	found, err := s.engine.Exists(ctx, key, engine.GetOptions{
 		NamespaceVersion: opts.NamespaceVersion,
 		SpaceVersion:     opts.SpaceVersion,
@@ -222,6 +247,13 @@ func (s *EngineService) Exists(ctx context.Context, key Key, opts GetOptions) (b
 }
 
 func (s *EngineService) Touch(ctx context.Context, key Key, opts TouchOptions) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.touchLocked(ctx, key, opts)
+}
+
+func (s *EngineService) touchLocked(ctx context.Context, key Key, opts TouchOptions) (bool, error) {
 	touched, err := s.engine.Touch(ctx, key, engine.TouchOptions{
 		TTL:              opts.TTL,
 		NamespaceVersion: opts.NamespaceVersion,
@@ -238,6 +270,10 @@ func (s *EngineService) Adjust(ctx context.Context, key Key, opts AdjustOptions)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.adjustLocked(ctx, key, opts)
+}
+
+func (s *EngineService) adjustLocked(ctx context.Context, key Key, opts AdjustOptions) (SetResult, error) {
 	if err := s.admitAdjust(ctx, key, opts); err != nil {
 		return SetResult{}, err
 	}
@@ -254,45 +290,4 @@ func (s *EngineService) Adjust(ctx context.Context, key Key, opts AdjustOptions)
 		return SetResult{}, fmt.Errorf("adjust engine record: %w", err)
 	}
 	return SetResult{Record: record, Found: applied}, nil
-}
-
-func (s *EngineService) Primitive(ctx context.Context, request PrimitiveRequest) (PrimitiveResult, error) {
-	if request.Kind.Mutates() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if err := s.admitPrimitive(ctx, request); err != nil {
-			return PrimitiveResult{}, err
-		}
-	}
-	return s.executePrimitive(ctx, request)
-}
-
-func (s *EngineService) executePrimitive(ctx context.Context, request PrimitiveRequest) (PrimitiveResult, error) {
-	result, err := s.engine.Primitive(ctx, request)
-	if err != nil {
-		return PrimitiveResult{}, fmt.Errorf("execute engine primitive: %w", err)
-	}
-	return result, nil
-}
-
-func (s *EngineService) Stats(ctx context.Context) (Stats, error) {
-	stats, err := s.engine.Stats(ctx)
-	if err != nil {
-		return Stats{}, fmt.Errorf("read engine stats: %w", err)
-	}
-	return stats, nil
-}
-
-func (s *EngineService) Evict(ctx context.Context, request EvictRequest) (EvictResult, error) {
-	result, err := s.engine.Evict(ctx, engine.EvictOptions{
-		Namespace:     request.Namespace,
-		Space:         request.Space,
-		TargetBytes:   request.TargetBytes,
-		Exclude:       request.Exclude,
-		ExcludeActive: request.Exclude.Key != "",
-	})
-	if err != nil {
-		return EvictResult{}, fmt.Errorf("evict engine records: %w", err)
-	}
-	return result, nil
 }

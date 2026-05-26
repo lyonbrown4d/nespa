@@ -19,6 +19,7 @@ const (
 	rebalanceEventRouteTableChanged = "route_table_changed"
 	rebalanceReasonNodeRegistered   = "node_registered"
 	rebalanceReasonNodeAddress      = "node_address_changed"
+	rebalanceReasonNodeRemoved      = "node_removed"
 	rebalanceReasonNodeRecovered    = "node_recovered"
 	rebalanceReasonNodeSuspect      = "node_suspect"
 	rebalanceReasonNodeDead         = "node_dead"

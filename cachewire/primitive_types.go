@@ -20,6 +20,16 @@ const (
 	PrimitiveListPopFront
 	PrimitiveListPopBack
 	PrimitiveListRange
+	PrimitiveBitmapSetBit
+	PrimitiveBitmapGetBit
+	PrimitiveBitmapBitCount
+	PrimitiveHLLAdd
+	PrimitiveHLLCount
+	PrimitiveHLLMerge
+	PrimitiveHLLMembers
+	PrimitiveGeoAdd
+	PrimitiveGeoDist
+	PrimitiveGeoRadius
 )
 
 type PrimitiveRequest struct {

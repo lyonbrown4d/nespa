@@ -27,4 +27,14 @@ const (
 	PrimitiveListPopFront    = engine.PrimitiveListPopFront
 	PrimitiveListPopBack     = engine.PrimitiveListPopBack
 	PrimitiveListRange       = engine.PrimitiveListRange
+	PrimitiveBitmapSetBit    = engine.PrimitiveBitmapSetBit
+	PrimitiveBitmapGetBit    = engine.PrimitiveBitmapGetBit
+	PrimitiveBitmapBitCount  = engine.PrimitiveBitmapBitCount
+	PrimitiveHLLAdd          = engine.PrimitiveHLLAdd
+	PrimitiveHLLCount        = engine.PrimitiveHLLCount
+	PrimitiveHLLMerge        = engine.PrimitiveHLLMerge
+	PrimitiveHLLMembers      = engine.PrimitiveHLLMembers
+	PrimitiveGeoAdd          = engine.PrimitiveGeoAdd
+	PrimitiveGeoDist         = engine.PrimitiveGeoDist
+	PrimitiveGeoRadius       = engine.PrimitiveGeoRadius
 )

@@ -21,6 +21,7 @@ import (
 	"github.com/lyonbrown4d/nespa/frontend"
 	"github.com/lyonbrown4d/nespa/node"
 	"github.com/lyonbrown4d/nespa/runtime"
+	rediscompat "github.com/lyonbrown4d/nespa/transport/redis"
 	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
 )
 
@@ -92,6 +93,7 @@ func controlModule(enabled bool) dix.Module {
 			dix.Contribute1[control.Endpoint, *control.ServiceRuntime](control.NewReadEndpoint, dix.Order(10)),
 			dix.Contribute1[control.Endpoint, *control.ServiceRuntime](control.NewCatalogEndpoint, dix.Order(20)),
 			dix.Contribute1[control.Endpoint, *control.ServiceRuntime](control.NewNodeEndpoint, dix.Order(30)),
+			dix.Contribute1[control.Endpoint, *control.ServiceRuntime](control.NewRaftEndpoint, dix.Order(40)),
 		),
 		dix.WithModuleImports(
 			configuredHTTPModule[*control.ServiceRuntime, control.Endpoint]("control", control.HTTPConfig),
@@ -167,6 +169,23 @@ func nodeModule(enabled bool) dix.Module {
 			dix.OnStop[*cachetcp.Server](func(ctx context.Context, server *cachetcp.Server) error {
 				return server.Stop(ctx)
 			}, dix.LifecycleName("node.tcp.stop")),
+		),
+	)
+}
+
+func redisModule(enabled bool) dix.Module {
+	return dix.NewModule("redis",
+		dix.Disabled(!enabled),
+		dix.WithModuleProviders(
+			dix.Provider2(rediscompat.NewServer),
+		),
+		dix.WithModuleHooks(
+			dix.OnStart2[*slog.Logger, *rediscompat.Server](func(ctx context.Context, logger *slog.Logger, server *rediscompat.Server) error {
+				return server.Start(ctx, logger)
+			}, dix.LifecycleName("redis.resp.start"), dix.LifecycleAfter("node.tcp.start")),
+			dix.OnStop[*rediscompat.Server](func(ctx context.Context, server *rediscompat.Server) error {
+				return server.Stop(ctx)
+			}, dix.LifecycleName("redis.resp.stop"), dix.LifecycleBefore("node.tcp.stop")),
 		),
 	)
 }

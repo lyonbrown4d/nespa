@@ -50,6 +50,10 @@ func (s *ControlState) Heartbeat(ctx context.Context, nodeID, addr string) (cont
 	return s.heartbeatAt(ctx, nodeID, addr, s.now())
 }
 
+func (s *ControlState) RemoveNode(ctx context.Context, nodeID string) (controlapi.RemoveNodeResponse, error) {
+	return s.removeNode(ctx, nodeID)
+}
+
 func (s *ControlState) heartbeatAt(ctx context.Context, nodeID, addr string, now time.Time) (controlapi.HeartbeatResponse, error) {
 	nodeID, addr, err := validateNodeIdentity(nodeID, addr)
 	if err != nil {
@@ -94,6 +98,33 @@ func (s *ControlState) heartbeatAt(ctx context.Context, nodeID, addr string, now
 	}
 
 	return controlapi.HeartbeatResponse{
+		Revision: s.revision,
+		Node:     node,
+	}, nil
+}
+
+func (s *ControlState) removeNode(ctx context.Context, nodeID string) (controlapi.RemoveNodeResponse, error) {
+	nodeID, err := normalizeNodeIdentity(nodeID)
+	if err != nil {
+		return controlapi.RemoveNodeResponse{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	node, exists := s.nodes.Get(nodeID)
+	if !exists {
+		return controlapi.RemoveNodeResponse{}, ErrNodeNotFound
+	}
+
+	s.nodes.Delete(nodeID)
+	s.revision++
+	s.recordRebalanceEventLocked(ctx, rebalanceEvent{
+		reason: rebalanceReasonNodeRemoved,
+		node:   node,
+	})
+
+	return controlapi.RemoveNodeResponse{
 		Revision: s.revision,
 		Node:     node,
 	}, nil

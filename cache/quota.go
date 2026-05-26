@@ -98,7 +98,7 @@ func (s *EngineService) ensureSpaceQuota(ctx context.Context, key Key, nsUsage, 
 		return nsUsage, spaceUsage, nil
 	}
 
-	evicted, err := s.Evict(ctx, EvictRequest{
+	evicted, err := s.evictLocked(ctx, EvictRequest{
 		Namespace:   key.Namespace,
 		Space:       key.Space,
 		TargetBytes: spaceUsage + delta - limit,

@@ -106,21 +106,19 @@ func bannerModule(stdout io.Writer) dix.Module {
 func endpoints(cfg serverConfig) *collectionlist.List[endpointInfo] {
 	items := collectionlist.NewList[endpointInfo]()
 
-	if cfg.Control.Enabled && cfg.Control.Addr != "" {
-		items.Add(endpointInfo{name: "control", scheme: "http", addr: cfg.Control.Addr})
-	}
-	if cfg.Node.Enabled && cfg.Node.Addr != "" {
-		items.Add(endpointInfo{name: "node", scheme: "tcp", addr: cfg.Node.Addr})
-	}
-
-	if cfg.Frontend.Enabled && cfg.Frontend.Addr != "" {
-		items.Add(endpointInfo{name: "frontend", scheme: "http", addr: cfg.Frontend.Addr})
-	}
-	if cfg.Admin.Enabled && cfg.Admin.Addr != "" {
-		items.Add(endpointInfo{name: "admin", scheme: "http", addr: cfg.Admin.Addr})
-	}
+	addEndpoint(items, cfg.Control.Enabled, "control", "http", cfg.Control.Addr)
+	addEndpoint(items, cfg.Node.Enabled, "node", "tcp", cfg.Node.Addr)
+	addEndpoint(items, cfg.Frontend.Enabled, "frontend", "http", cfg.Frontend.Addr)
+	addEndpoint(items, cfg.Redis.Enabled, "redis", "redis", cfg.Redis.Addr)
+	addEndpoint(items, cfg.Admin.Enabled, "admin", "http", cfg.Admin.Addr)
 
 	return items
+}
+
+func addEndpoint(items *collectionlist.List[endpointInfo], enabled bool, name, scheme, addr string) {
+	if enabled && addr != "" {
+		items.Add(endpointInfo{name: name, scheme: scheme, addr: addr})
+	}
 }
 
 func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags *pflag.FlagSet) error {
@@ -143,6 +141,7 @@ func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags
 		controlModule(cfg.Control.Enabled),
 		nodeModule(cfg.Node.Enabled),
 		frontendModule(cfg.Frontend.Enabled),
+		redisModule(cfg.Redis.Enabled),
 		adminModule(cfg.Admin.Enabled),
 	)
 
@@ -160,7 +159,7 @@ func runDixApp(ctx context.Context, stdout io.Writer, logger *slog.Logger, flags
 }
 
 func validateServerConfig(cfg serverConfig) error {
-	if !cfg.Control.Enabled && !cfg.Node.Enabled && !cfg.Frontend.Enabled && !cfg.Admin.Enabled {
+	if !cfg.Control.Enabled && !cfg.Node.Enabled && !cfg.Frontend.Enabled && !cfg.Redis.Enabled && !cfg.Admin.Enabled {
 		return fmt.Errorf("validate server config: %w",
 			oops.Code("invalid_server_config").
 				In("cmd").
@@ -168,16 +167,42 @@ func validateServerConfig(cfg serverConfig) error {
 					"control_enabled", cfg.Control.Enabled,
 					"node_enabled", cfg.Node.Enabled,
 					"frontend_enabled", cfg.Frontend.Enabled,
+					"redis_enabled", cfg.Redis.Enabled,
 					"admin_enabled", cfg.Admin.Enabled,
 				).
 				New("at least one service must be enabled"))
 	}
+	if err := validateAdminConfig(cfg); err != nil {
+		return err
+	}
+	return validateRedisConfig(cfg)
+}
+
+func validateAdminConfig(cfg serverConfig) error {
 	if cfg.Admin.Enabled && (!cfg.Control.Enabled || !cfg.Node.Enabled) {
 		return fmt.Errorf("validate server config: %w",
 			oops.Code("invalid_server_config").
 				In("cmd").
 				With("admin_enabled", cfg.Admin.Enabled, "control_enabled", cfg.Control.Enabled, "node_enabled", cfg.Node.Enabled).
 				New("admin service requires colocated control and node services"))
+	}
+	return nil
+}
+
+func validateRedisConfig(cfg serverConfig) error {
+	if cfg.Redis.Enabled && !cfg.Node.Enabled {
+		return fmt.Errorf("validate server config: %w",
+			oops.Code("invalid_server_config").
+				In("cmd").
+				With("redis_enabled", cfg.Redis.Enabled, "node_enabled", cfg.Node.Enabled).
+				New("redis compatibility service requires node service"))
+	}
+	if cfg.Redis.Enabled && len(cfg.Redis.Users) == 0 {
+		return fmt.Errorf("validate server config: %w",
+			oops.Code("invalid_server_config").
+				In("cmd").
+				With("redis_enabled", cfg.Redis.Enabled).
+				New("redis compatibility service requires at least one AUTH user"))
 	}
 	return nil
 }

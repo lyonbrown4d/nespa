@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"sort"
 
 	"github.com/arcgolabs/httpx"
 	"github.com/lyonbrown4d/nespa/controlapi"
@@ -25,6 +26,10 @@ type nodeEndpoint struct {
 	svc *ServiceRuntime
 }
 
+type raftEndpoint struct {
+	svc *ServiceRuntime
+}
+
 func NewReadEndpoint(svc *ServiceRuntime) Endpoint {
 	return &readEndpoint{state: svc.state}
 }
@@ -35,6 +40,10 @@ func NewCatalogEndpoint(svc *ServiceRuntime) Endpoint {
 
 func NewNodeEndpoint(svc *ServiceRuntime) Endpoint {
 	return &nodeEndpoint{svc: svc}
+}
+
+func NewRaftEndpoint(svc *ServiceRuntime) Endpoint {
+	return &raftEndpoint{svc: svc}
 }
 
 func (e *readEndpoint) controlEndpoint() {}
@@ -162,6 +171,7 @@ func (e *nodeEndpoint) Register(registrar httpx.Registrar) {
 	scope := registrar.Scope()
 	httpx.MustGroupGet(scope, "/nodes", e.Nodes)
 	httpx.MustGroupPost(scope, "/nodes", e.RegisterNode)
+	httpx.MustGroupPost(scope, "/nodes/remove", e.RemoveNode)
 	httpx.MustGroupPut(scope, "/nodes/heartbeat", e.Heartbeat)
 }
 
@@ -189,6 +199,92 @@ func (e *nodeEndpoint) Heartbeat(
 		return nil, controlStateError("invalid node heartbeat", err)
 	}
 	return runtime.JSON(response), nil
+}
+
+func (e *nodeEndpoint) RemoveNode(
+	ctx context.Context,
+	input *controlapi.RemoveNodeInput,
+) (*runtime.JSONResponse[controlapi.RemoveNodeResponse], error) {
+	response, err := e.svc.RemoveNode(ctx, input.Body.NodeID)
+	if err != nil {
+		return nil, controlStateError("invalid remove node request", err)
+	}
+	return runtime.JSON(response), nil
+}
+
+func (e *raftEndpoint) controlEndpoint() {}
+
+func (e *raftEndpoint) EndpointSpec() httpx.EndpointSpec {
+	return controlEndpointSpec()
+}
+
+func (e *raftEndpoint) Register(registrar httpx.Registrar) {
+	scope := registrar.Scope()
+	httpx.MustGroupGet(scope, "/raft/members", e.RaftMembers)
+	httpx.MustGroupPost(scope, "/raft/members/add", e.AddRaftMember)
+	httpx.MustGroupPost(scope, "/raft/members/remove", e.RemoveRaftMember)
+}
+
+func (e *raftEndpoint) RaftMembers(
+	ctx context.Context,
+	_ *runtime.EmptyInput,
+) (*runtime.JSONResponse[controlapi.RaftMembersBody], error) {
+	members, err := e.svc.RaftMembers(ctx)
+	if err != nil {
+		return nil, controlStateError("read raft members failed", err)
+	}
+	return runtime.JSON(controlapi.RaftMembersBody{Members: raftMemberBodies(members)}), nil
+}
+
+func (e *raftEndpoint) AddRaftMember(
+	ctx context.Context,
+	input *controlapi.AddRaftMemberInput,
+) (*runtime.JSONResponse[controlapi.AddRaftMemberResponse], error) {
+	if err := e.svc.AddRaftNode(ctx, input.Body.NodeID, input.Body.Addr); err != nil {
+		return nil, controlStateError("add raft member failed", err)
+	}
+	members, err := e.svc.RaftMembers(ctx)
+	if err != nil {
+		return nil, controlStateError("read raft members failed", err)
+	}
+	return runtime.JSON(controlapi.AddRaftMemberResponse{
+		Member: controlapi.RaftMemberBody{
+			NodeID: input.Body.NodeID,
+			Addr:   input.Body.Addr,
+		},
+		Members: raftMemberBodies(members),
+	}), nil
+}
+
+func (e *raftEndpoint) RemoveRaftMember(
+	ctx context.Context,
+	input *controlapi.RemoveRaftMemberInput,
+) (*runtime.JSONResponse[controlapi.RemoveRaftMemberResponse], error) {
+	if err := e.svc.RemoveRaftNode(ctx, input.Body.NodeID); err != nil {
+		return nil, controlStateError("remove raft member failed", err)
+	}
+	members, err := e.svc.RaftMembers(ctx)
+	if err != nil {
+		return nil, controlStateError("read raft members failed", err)
+	}
+	return runtime.JSON(controlapi.RemoveRaftMemberResponse{
+		NodeID:  input.Body.NodeID,
+		Members: raftMemberBodies(members),
+	}), nil
+}
+
+func raftMemberBodies(members map[uint64]string) []controlapi.RaftMemberBody {
+	out := make([]controlapi.RaftMemberBody, 0, len(members))
+	for nodeID, addr := range members {
+		out = append(out, controlapi.RaftMemberBody{
+			NodeID: nodeID,
+			Addr:   addr,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].NodeID < out[j].NodeID
+	})
+	return out
 }
 
 func controlEndpointSpec() httpx.EndpointSpec {

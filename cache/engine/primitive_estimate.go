@@ -5,6 +5,26 @@ import (
 	"strconv"
 )
 
+type primitiveEstimateHandler func(*shardWorker, shardCommand) shardResult
+
+var mutatingPrimitiveEstimateHandlers = map[uint8]primitiveEstimateHandler{
+	uint8(PrimitiveCounterAdjust):   (*shardWorker).estimateCounterPrimitive,
+	uint8(PrimitiveMapSet):          (*shardWorker).estimateMapPrimitive,
+	uint8(PrimitiveMapDelete):       (*shardWorker).estimateMapPrimitive,
+	uint8(PrimitiveSetAdd):          (*shardWorker).estimateSetPrimitive,
+	uint8(PrimitiveSetRemove):       (*shardWorker).estimateSetPrimitive,
+	uint8(PrimitiveScoredSetPut):    (*shardWorker).estimateScoredSetPrimitive,
+	uint8(PrimitiveScoredSetRemove): (*shardWorker).estimateScoredSetPrimitive,
+	uint8(PrimitiveListPushFront):   (*shardWorker).estimateListPrimitive,
+	uint8(PrimitiveListPushBack):    (*shardWorker).estimateListPrimitive,
+	uint8(PrimitiveListPopFront):    (*shardWorker).estimateListPrimitive,
+	uint8(PrimitiveListPopBack):     (*shardWorker).estimateListPrimitive,
+	uint8(PrimitiveBitmapSetBit):    (*shardWorker).estimateBitmapPrimitive,
+	uint8(PrimitiveHLLAdd):          (*shardWorker).estimateHLLPrimitive,
+	uint8(PrimitiveHLLMerge):        (*shardWorker).estimateHLLPrimitive,
+	uint8(PrimitiveGeoAdd):          (*shardWorker).estimateGeoPrimitive,
+}
+
 func (e *MemoryEngine) EstimatePrimitive(
 	ctx context.Context,
 	request PrimitiveRequest,
@@ -32,22 +52,8 @@ func (s *shardWorker) applyPrimitiveEstimate(cmd shardCommand) shardResult {
 	if !cmd.primitive.Kind.Mutates() {
 		return shardResult{estimate: PrimitiveEstimate{Key: cmd.key}}
 	}
-
-	switch cmd.primitive.Kind {
-	case PrimitiveCounterAdjust:
-		return s.estimateCounterPrimitive(cmd)
-	case PrimitiveMapSet, PrimitiveMapDelete:
-		return s.estimateMapPrimitive(cmd)
-	case PrimitiveSetAdd, PrimitiveSetRemove:
-		return s.estimateSetPrimitive(cmd)
-	case PrimitiveScoredSetPut, PrimitiveScoredSetRemove:
-		return s.estimateScoredSetPrimitive(cmd)
-	case PrimitiveListPushFront, PrimitiveListPushBack,
-		PrimitiveListPopFront, PrimitiveListPopBack:
-		return s.estimateListPrimitive(cmd)
-	case PrimitiveMapGet, PrimitiveMapGetAll, PrimitiveSetContains,
-		PrimitiveSetMembers, PrimitiveScoredSetRange, PrimitiveListRange:
-		return shardResult{estimate: PrimitiveEstimate{Key: cmd.key}}
+	if handler, ok := mutatingPrimitiveEstimateHandlers[uint8(cmd.primitive.Kind)]; ok {
+		return handler(s, cmd)
 	}
 	return shardResult{err: primitiveValidationError(cmd.primitive.Kind, "unknown kind")}
 }

@@ -34,6 +34,16 @@ var primitiveValidators = map[PrimitiveKind]func(PrimitiveRequest) error{
 	PrimitiveListPopFront:    noPrimitiveShapeValidation,
 	PrimitiveListPopBack:     noPrimitiveShapeValidation,
 	PrimitiveListRange:       validateListRange,
+	PrimitiveBitmapSetBit:    validateBitmapSetBit,
+	PrimitiveBitmapGetBit:    validateBitmapOffset,
+	PrimitiveBitmapBitCount:  validateBitmapBitCount,
+	PrimitiveHLLAdd:          requirePrimitiveMember,
+	PrimitiveHLLCount:        noPrimitiveShapeValidation,
+	PrimitiveHLLMerge:        noPrimitiveShapeValidation,
+	PrimitiveHLLMembers:      noPrimitiveShapeValidation,
+	PrimitiveGeoAdd:          validateGeoAdd,
+	PrimitiveGeoDist:         validateGeoDist,
+	PrimitiveGeoRadius:       validateGeoRadius,
 }
 
 func validatePrimitiveShape(request PrimitiveRequest) error {
@@ -94,6 +104,71 @@ func validateListRange(request PrimitiveRequest) error {
 		return primitiveValidationError(request.Kind, "start must be non-negative")
 	}
 	return nil
+}
+
+func validateBitmapSetBit(request PrimitiveRequest) error {
+	if err := validateBitmapOffset(request); err != nil {
+		return err
+	}
+	if request.InitialValue != 0 && request.InitialValue != 1 {
+		return primitiveValidationError(request.Kind, "bit value must be 0 or 1")
+	}
+	return nil
+}
+
+func validateBitmapOffset(request PrimitiveRequest) error {
+	if request.Delta < 0 {
+		return primitiveValidationError(request.Kind, "offset must be non-negative")
+	}
+	if int64(int(request.Delta)) != request.Delta {
+		return primitiveValidationError(request.Kind, "offset is too large")
+	}
+	return nil
+}
+
+func validateBitmapBitCount(request PrimitiveRequest) error {
+	if request.Start < 0 {
+		return primitiveValidationError(request.Kind, "start must be non-negative")
+	}
+	if request.Limit > uint64(int(^uint(0)>>1)) {
+		return primitiveValidationError(request.Kind, "limit is too large")
+	}
+	return nil
+}
+
+func validateGeoAdd(request PrimitiveRequest) error {
+	if err := requirePrimitiveMember(request); err != nil {
+		return err
+	}
+	if !validLongitude(request.Score) || !validLatitude(request.MinScore) {
+		return primitiveValidationError(request.Kind, "invalid longitude or latitude")
+	}
+	return nil
+}
+
+func validateGeoDist(request PrimitiveRequest) error {
+	if request.Member == "" || request.Field == "" {
+		return primitiveValidationError(request.Kind, "members are required")
+	}
+	return nil
+}
+
+func validateGeoRadius(request PrimitiveRequest) error {
+	if !validLongitude(request.Score) || !validLatitude(request.MinScore) {
+		return primitiveValidationError(request.Kind, "invalid longitude or latitude")
+	}
+	if request.MaxScore < 0 {
+		return primitiveValidationError(request.Kind, "radius must be non-negative")
+	}
+	return nil
+}
+
+func validLongitude(value float64) bool {
+	return value >= -180 && value <= 180
+}
+
+func validLatitude(value float64) bool {
+	return value >= -90 && value <= 90
 }
 
 func primitiveValidationError(kind PrimitiveKind, reason string) error {

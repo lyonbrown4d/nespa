@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -32,9 +33,16 @@ type RaftConfig struct {
 	Addr               string
 	ClusterID          uint64
 	NodeID             uint64
+	Join               bool
+	Members            []RaftMember
 	ProposalTimeout    time.Duration
 	SnapshotEntries    uint64
 	CompactionOverhead uint64
+}
+
+type RaftMember struct {
+	NodeID uint64 `json:"node_id"`
+	Addr   string `json:"addr"`
 }
 
 type DragonboatRuntime struct {
@@ -141,7 +149,10 @@ func (r *DragonboatRuntime) Stop() error {
 }
 
 func newDragonboatRuntime(cfg RaftConfig, state *ControlState, fsm *ControlFSM) (*DragonboatRuntime, error) {
-	cfg = normalizeRaftConfig(cfg)
+	cfg, err := normalizeRaftConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	nodeHostDir, tempNodeHostDir, err := resolveNodeHostDir(cfg.NodeHostDir)
 	if err != nil {
 		return nil, err
@@ -161,12 +172,7 @@ func newDragonboatRuntime(cfg RaftConfig, state *ControlState, fsm *ControlFSM) 
 		return nil, errors.Join(wrapControlRaftStartError(err), removeTempNodeHostDir(tempNodeHostDir))
 	}
 
-	initialMembers := map[uint64]dragonboat.Target(nil)
-	if !hasData {
-		initialMembers = map[uint64]dragonboat.Target{
-			cfg.NodeID: cfg.Addr,
-		}
-	}
+	initialMembers := resolveRaftInitialMembers(cfg, hasData)
 
 	createStateMachine := func(uint64, uint64) dragonstatemachine.IStateMachine {
 		return &dragonboatStateMachine{state: state, fsm: fsm}
@@ -180,7 +186,16 @@ func newDragonboatRuntime(cfg RaftConfig, state *ControlState, fsm *ControlFSM) 
 		SnapshotEntries:    cfg.SnapshotEntries,
 		CompactionOverhead: cfg.CompactionOverhead,
 	}
-	if err := nodeHost.StartCluster(initialMembers, false, createStateMachine, raftConfig); err != nil {
+	join := cfg.Join && !hasData
+	if !hasData && !join && len(initialMembers) == 0 {
+		nodeHost.Stop()
+		return nil, fmt.Errorf("control raft initial members missing: %w", oops.Code("control_raft_initial_members_missing").
+			In("control.raft").
+			With("node_id", cfg.NodeID).
+			New("control raft initial members is missing"))
+	}
+
+	if err := nodeHost.StartCluster(initialMembers, join, createStateMachine, raftConfig); err != nil {
 		nodeHost.Stop()
 		return nil, errors.Join(wrapControlRaftStartError(err), removeTempNodeHostDir(tempNodeHostDir))
 	}
@@ -207,29 +222,6 @@ func (s *ServiceRuntime) proposeBootstrapNodes(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func normalizeRaftConfig(cfg RaftConfig) RaftConfig {
-	cfg.Addr = strings.TrimSpace(cfg.Addr)
-	if cfg.Addr == "" {
-		cfg.Addr = defaultControlRaftAddr
-	}
-	if cfg.ClusterID == 0 {
-		cfg.ClusterID = defaultControlRaftClusterID
-	}
-	if cfg.NodeID == 0 {
-		cfg.NodeID = defaultControlRaftNodeID
-	}
-	if cfg.ProposalTimeout <= 0 {
-		cfg.ProposalTimeout = defaultControlProposalWait
-	}
-	if cfg.SnapshotEntries == 0 {
-		cfg.SnapshotEntries = defaultControlSnapshotEntries
-	}
-	if cfg.CompactionOverhead == 0 {
-		cfg.CompactionOverhead = defaultControlCompactionOverhead
-	}
-	return cfg
 }
 
 func resolveNodeHostDir(path string) (string, string, error) {

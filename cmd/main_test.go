@@ -20,9 +20,14 @@ func TestLoadServerConfigFromFlags(t *testing.T) {
 		"--control-liveness-sweep-interval", "1s",
 		"--control-liveness-suspect-after", "2s",
 		"--control-liveness-dead-after", "3s",
+		"--control-raft-join", "true",
+		"--control-raft-members", "2=127.0.0.1:7602",
 		"--control-migration-max-parallel-tasks", "4",
 		"--frontend-enabled=false",
 		"--frontend-addr", "127.0.0.1:9002",
+		"--redis-enabled=true",
+		"--redis-addr", "127.0.0.1:96379",
+		"--redis-users", "app=secret",
 		"--admin-enabled=false",
 		"--node-enabled=true",
 		"--node-addr", "127.0.0.1:9003",
@@ -85,6 +90,7 @@ func TestEndpoints(t *testing.T) {
 	cfg := serverConfig{
 		Control: controlConfig{Enabled: true, Addr: "127.0.0.1:7401"},
 		Node:    nodeConfig{Enabled: true, Addr: "127.0.0.1:7403"},
+		Redis:   redisConfig{Enabled: true, Addr: "127.0.0.1:6379"},
 		Frontend: frontendConfig{
 			Enabled: true,
 			Addr:    "127.0.0.1:7402",
@@ -95,12 +101,13 @@ func TestEndpoints(t *testing.T) {
 		},
 	}
 	got := endpointsForTest(t, endpoints(cfg))
-	expect := []string{"control", "node", "frontend", "admin"}
+	expect := []string{"control", "node", "frontend", "redis", "admin"}
 	if !slices.Equal(got, expect) {
 		t.Fatalf("endpoints() = %v, want %v", got, expect)
 	}
 
 	cfg.Frontend.Enabled = false
+	cfg.Redis.Enabled = false
 	cfg.Admin.Enabled = false
 	got = endpointsForTest(t, endpoints(cfg))
 	expect = []string{"control", "node"}
@@ -133,6 +140,20 @@ func TestValidateServerConfig(t *testing.T) {
 	}); err == nil {
 		t.Fatal("admin without colocated control should be invalid")
 	}
+
+	if err := validateServerConfig(serverConfig{
+		Node:  nodeConfig{Enabled: true},
+		Redis: redisConfig{Enabled: true},
+	}); err == nil {
+		t.Fatal("redis without auth users should be invalid")
+	}
+
+	if err := validateServerConfig(serverConfig{
+		Node:  nodeConfig{Enabled: false},
+		Redis: redisConfig{Enabled: true, Users: []string{"app=secret"}},
+	}); err == nil {
+		t.Fatal("redis without node should be invalid")
+	}
 }
 
 func endpointsForTest(t *testing.T, values *collectionlist.List[endpointInfo]) []string {
@@ -163,9 +184,14 @@ func assertConfigValues(t *testing.T, cfg serverConfig) {
 		{name: "liveness sweep", got: cfg.Control.Liveness.Sweep.Interval, want: time.Second},
 		{name: "liveness suspect", got: cfg.Control.Liveness.Suspect.After, want: 2 * time.Second},
 		{name: "liveness dead", got: cfg.Control.Liveness.Dead.After, want: 3 * time.Second},
+		{name: "raft join", got: cfg.Control.Raft.Join, want: true},
+		{name: "raft members", got: cfg.Control.Raft.Members, want: []string{"2=127.0.0.1:7602"}},
 		{name: "migration max parallel tasks", got: cfg.Control.Migration.Max.Parallel.Tasks, want: 4},
 		{name: "frontend enabled", got: cfg.Frontend.Enabled, want: false},
 		{name: "frontend addr", got: cfg.Frontend.Addr, want: "127.0.0.1:9002"},
+		{name: "redis enabled", got: cfg.Redis.Enabled, want: true},
+		{name: "redis addr", got: cfg.Redis.Addr, want: "127.0.0.1:96379"},
+		{name: "redis users", got: cfg.Redis.Users, want: []string{"app=secret"}},
 		{name: "admin enabled", got: cfg.Admin.Enabled, want: false},
 		{name: "node enabled", got: cfg.Node.Enabled, want: true},
 		{name: "node addr", got: cfg.Node.Addr, want: "127.0.0.1:9003"},
