@@ -31,6 +31,7 @@ type Server struct {
 	addr        string
 	service     cache.Service
 	credentials map[string]string
+	scripts     map[string]string
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -59,6 +60,7 @@ func NewServer(cfg Config, service cache.Service) *Server {
 		addr:        addr,
 		service:     service,
 		credentials: parseCredentials(cfg.Users),
+		scripts:     make(map[string]string),
 	}
 }
 
@@ -155,7 +157,7 @@ func (s *Server) runSession(
 		if s.sessionReadFailed(logger, err) {
 			return
 		}
-		if s.writeCommandResponse(ctx, logger, writer, state, args) {
+		if s.writeCommandResponse(ctx, logger, reader, writer, state, args) {
 			return
 		}
 	}
@@ -174,13 +176,21 @@ func (s *Server) sessionReadFailed(logger *slog.Logger, err error) bool {
 func (s *Server) writeCommandResponse(
 	ctx context.Context,
 	logger *slog.Logger,
+	reader *bufio.Reader,
 	writer *bufio.Writer,
 	state *session,
 	args []respArg,
 ) bool {
 	response := s.responseForCommand(ctx, state, args)
-	if err := writeRESP(writer, response); err != nil {
+	if err := encodeRESP(writer, response); err != nil {
 		logger.Debug("redis compatibility frame encode failed", "error", err)
+		return true
+	}
+	if reader.Buffered() > 0 && !state.close {
+		return false
+	}
+	if err := flushRESP(writer); err != nil {
+		logger.Debug("redis compatibility frame flush failed", "error", err)
 		return true
 	}
 	return state.close

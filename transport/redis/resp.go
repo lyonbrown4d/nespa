@@ -185,10 +185,7 @@ func inlineCommand(line []byte) []respArg {
 	return args
 }
 
-func writeRESP(writer *bufio.Writer, value respValue) error {
-	if err := encodeRESP(writer, value); err != nil {
-		return err
-	}
+func flushRESP(writer *bufio.Writer) error {
 	if err := writer.Flush(); err != nil {
 		return fmt.Errorf("flush redis response: %w", err)
 	}

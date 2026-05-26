@@ -49,7 +49,7 @@ Nespa 优先解决这些问题：
 Nespa 第一阶段明确不做：
 
 - 完整 Redis-compatible replacement
-- Redis Cluster、Lua、Stream、PubSub、WATCH/Lua 事务等完整 Redis 生态兼容
+- Redis Cluster、Stream、PubSub、WATCH 等完整 Redis 生态兼容；Lua 仅支持当前阶段明确列出的受限脚本子集
 - 完整 Redis 命令矩阵
 - SQL 数据库能力
 - 跨 namespace 查询
@@ -84,8 +84,9 @@ Nespa 第一阶段明确不做：
 - Redis RESP 兼容入口是可选 ingress，不进入核心数据面；支持范围内的外部 Redis client 目标是只替换服务地址；
 - RESP 连接必须使用 `AUTH username password`；`username` 映射 Nespa namespace；
 - Redis DB 号通过 `SELECT` 映射为 Nespa space，例如 `SELECT 0` => `0-space`；
-- 当前 RESP 命令子集覆盖连接握手、String/Counter/Batch、Hash/Set/List/Sorted Set、Bitmap、HyperLogLog、Geo 和事务队列：`GET/SET/DEL/EXISTS/EXPIRE/TTL/INCR/DECR/INCRBY/DECRBY/MGET/MSET/TYPE`、`HSET/HGET/HDEL/HGETALL/HEXISTS/HLEN`、`SADD/SREM/SISMEMBER/SMEMBERS/SCARD`、`LPUSH/RPUSH/LPOP/RPOP/LRANGE/LLEN`、`ZADD/ZREM/ZRANGE/ZCARD`、`SETBIT/GETBIT/BITCOUNT`、`PFADD/PFCOUNT/PFMERGE`、`GEOADD/GEODIST/GEORADIUS`、`MULTI/EXEC/DISCARD`；
-- 不承诺完整 Redis Cluster、Lua、Stream、PubSub、WATCH 或完整 Redis 命令覆盖；
+- 当前 RESP 命令子集覆盖连接握手、String/Counter/Batch、Hash/Set/List/Sorted Set、Bitmap、HyperLogLog、Geo、事务队列和受限 Lua 脚本：`GET/SET/DEL/EXISTS/EXPIRE/TTL/INCR/DECR/INCRBY/DECRBY/MGET/MSET/TYPE`、`HSET/HGET/HDEL/HGETALL/HEXISTS/HLEN`、`SADD/SREM/SISMEMBER/SMEMBERS/SCARD`、`LPUSH/RPUSH/LPOP/RPOP/LRANGE/LLEN`、`ZADD/ZREM/ZRANGE/ZCARD`、`SETBIT/GETBIT/BITCOUNT`、`PFADD/PFCOUNT/PFMERGE`、`GEOADD/GEODIST/GEORADIUS`、`MULTI/EXEC/DISCARD`、`EVAL/EVALSHA/SCRIPT LOAD/SCRIPT EXISTS/SCRIPT FLUSH`；
+- Lua 支持范围限定为 Redis 脚本入口的最小子集：提供 `KEYS`/`ARGV`，`redis.call`/`redis.pcall` 只能调用当前 RESP 层已经支持的命令，脚本执行由 service transaction callback 包裹，复用现有 quota/ExpectedVersion/primitive admission，并受超时和命令调用次数上限约束；
+- 不承诺完整 Redis Cluster、Stream、PubSub、WATCH、完整 Redis 命令覆盖、Redis 全命令矩阵中的 Lua 调用兼容，也不承诺完整 Lua 标准库/模块/调试器等 Lua 生态兼容；
 - primitive collection 仍绑定 `namespace/space/entity/key` 地址模型，并共享 TTL、ExpectedVersion、namespace/space version、route_epoch、quota admission 和 batch 语义；
 - collection 值在 DataNode 内部使用 `collectionx` 二进制序列化；外部仍通过 Nespa TCP frame 暴露稳定协议，不暴露内部编码。首版 ListRange 使用 `start + limit + reverse` 语义，不引入 Redis LRANGE 的负索引兼容。
 
@@ -97,7 +98,7 @@ Nespa 第一阶段明确不做：
 - 数据热路径走 TCP binary protocol，已支持 KV、adjust、batch set/get/delete/exists/touch、primitive、batch primitive；
 - DataNode memory engine 已有 TTL、ExpectedVersion 乐观锁、namespace/space version 可见性、sampled eviction、namespace/space memory quota；
 - set、adjust、primitive 写入、batch 写入和 transaction callback 内部写入已接入 quota admission，写前预估增长成本，不允许绕过 space/namespace quota；ExpectedVersion 未命中时不会提前触发 quota reject；
-- primitive collection 已覆盖 Counter、Map、Set、ScoredSet、List、Bitmap、HyperLogLog、Geo；Redis RESP 入口已映射 Hash/Set/List/ZSet/Bitmap/HyperLogLog/Geo 和 `MULTI/EXEC/DISCARD`；
+- primitive collection 已覆盖 Counter、Map、Set、ScoredSet、List、Bitmap、HyperLogLog、Geo；Redis RESP 入口已映射 Hash/Set/List/ZSet/Bitmap/HyperLogLog/Geo、`MULTI/EXEC/DISCARD` 和受限 Lua 脚本入口 `EVAL/EVALSHA/SCRIPT LOAD/SCRIPT EXISTS/SCRIPT FLUSH`；
 - routed TCP client 会读取 control snapshot，按 vslot 直连 DataNode；batch set/get/delete/exists/touch/primitive 会按 route 分组，失败后刷新 snapshot 并只重试未完成组；
 - control 写路径默认通过 Dragonboat Raft proposal 驱动 FSM Apply，并使用 Dragonboat log/snapshot 做控制面恢复；`--control-snapshot-path` 只作为 JSON 导入/导出辅助；
 - control rebalance 除事件外已生成 migration plan，记录需要从 source node 迁移到 target node 的 namespace/space/vslot 范围；control snapshot 的 route 仍以 `node_id/addr` 表示 primary，同时携带 `replicas` 作为 DataNode async replication 的目标元数据；
@@ -1998,6 +1999,7 @@ BatchDelete/BatchExists/BatchTouch
 BatchPrimitive
 Service-level transaction callback
 Redis MULTI/EXEC/DISCARD queue
+limited Redis Lua scripting: EVAL/EVALSHA/SCRIPT LOAD/EXISTS/FLUSH, KEYS/ARGV, redis.call/pcall on supported commands
 async primary-replica replication
 Go SDK
 Java SDK direct TCP/wire foundation
@@ -2018,7 +2020,9 @@ OpenTelemetry tracing
 
 ```text
 complete Redis compatibility
-Redis Cluster / Lua / Stream / PubSub / WATCH
+Redis Cluster / Stream / PubSub / WATCH
+full Redis command matrix for Lua scripts
+complete Lua ecosystem compatibility
 JOIN
 aggregation
 continuous query
@@ -2146,7 +2150,7 @@ multi-region deployment
 | Event Bus | eventx |
 | DSL | plano 作为 schema/control DSL |
 | Query | 自研 QueryAST + planner |
-| Redis compatibility | 可选 RESP 入口；不承诺完整 Redis |
+| Redis compatibility | 可选 RESP 入口；含受限 Lua 脚本子集；不承诺完整 Redis |
 | Query 范围 | namespace/space/entity |
 | Full scan | 默认禁止 |
 

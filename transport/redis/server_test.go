@@ -3,8 +3,6 @@ package redis_test
 import (
 	"bufio"
 	"context"
-	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"strconv"
@@ -87,6 +85,34 @@ func TestServerStringCounterBatchAndTTLCommands(t *testing.T) {
 	requireLine(t, reader, "*3")
 	requireBulk(t, reader, "1")
 	requireBulk(t, reader, "2")
+	requireLine(t, reader, "$-1")
+}
+
+func TestServerProcessesPipelinedCommandsFromSingleWrite(t *testing.T) {
+	server, _ := startRedisServer(t)
+	conn := dialRedisServer(t, server.Addr())
+	defer closeTestConn(t, conn)
+	reader := bufio.NewReader(conn)
+
+	raw := encodeCommand("SET", "before-auth", "value")
+	raw = append(raw, encodeCommand("AUTH", "alice", "secret")...)
+	raw = append(raw, encodeCommand("SET", "pipe-key", "value")...)
+	raw = append(raw, encodeCommand("GET", "pipe-key")...)
+	raw = append(raw, encodeCommand("EXISTS", "pipe-key", "missing")...)
+	raw = append(raw, encodeCommand("DEL", "pipe-key")...)
+	raw = append(raw, encodeCommand("EXISTS", "pipe-key")...)
+	raw = append(raw, encodeCommand("GET", "pipe-key")...)
+	if _, err := conn.Write(raw); err != nil {
+		t.Fatalf("write pipeline: %v", err)
+	}
+
+	requireLine(t, reader, "-NOAUTH Authentication required.")
+	requireLine(t, reader, "+OK")
+	requireLine(t, reader, "+OK")
+	requireBulk(t, reader, "value")
+	requireLine(t, reader, ":1")
+	requireLine(t, reader, ":1")
+	requireLine(t, reader, ":0")
 	requireLine(t, reader, "$-1")
 }
 
@@ -189,6 +215,13 @@ func dialRedisServer(t *testing.T, addr string) net.Conn {
 
 func writeCommand(t *testing.T, conn net.Conn, args ...string) {
 	t.Helper()
+	raw := encodeCommand(args...)
+	if _, err := conn.Write(raw); err != nil {
+		t.Fatalf("write command: %v", err)
+	}
+}
+
+func encodeCommand(args ...string) []byte {
 	raw := []byte("*")
 	raw = strconv.AppendInt(raw, int64(len(args)), 10)
 	raw = append(raw, '\r', '\n')
@@ -199,9 +232,7 @@ func writeCommand(t *testing.T, conn net.Conn, args ...string) {
 		raw = append(raw, arg...)
 		raw = append(raw, '\r', '\n')
 	}
-	if _, err := conn.Write(raw); err != nil {
-		t.Fatalf("write command: %v", err)
-	}
+	return raw
 }
 
 func requireLine(t *testing.T, reader *bufio.Reader, want string) {
@@ -223,13 +254,9 @@ func requireArrayHeader(t *testing.T, reader *bufio.Reader, want int) {
 
 func requireBulk(t *testing.T, reader *bufio.Reader, want string) {
 	t.Helper()
-	requireLine(t, reader, fmt.Sprintf("$%d", len(want)))
-	raw := make([]byte, len(want)+2)
-	if _, err := io.ReadFull(reader, raw); err != nil {
-		t.Fatalf("read bulk body: %v", err)
-	}
-	if string(raw[:len(want)]) != want || string(raw[len(want):]) != "\r\n" {
-		t.Fatalf("bulk body = %q, want %q", raw, want)
+	got := readBulk(t, reader)
+	if got != want {
+		t.Fatalf("bulk body = %q, want %q", got, want)
 	}
 }
 
