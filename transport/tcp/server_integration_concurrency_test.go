@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,7 +12,6 @@ import (
 	"github.com/lyonbrown4d/nespa/cache"
 	"github.com/lyonbrown4d/nespa/cache/engine"
 	"github.com/lyonbrown4d/nespa/cachewire"
-	"github.com/lyonbrown4d/nespa/protocol"
 	cachetcp "github.com/lyonbrown4d/nespa/transport/tcp"
 )
 
@@ -47,61 +45,13 @@ func benchmarkServerParallelGet(b *testing.B, concurrency int) {
 	addr, stopServer := startServerForConcurrencyBenchmark(b)
 	b.Cleanup(stopServer)
 
-	seedClient, err := newBenchmarkFrameClientForConcurrency(addr)
-	if err != nil {
-		b.Fatalf("seed benchmark frame client: %v", err)
-	}
-	for worker := 0; worker < concurrency; worker++ {
-		if _, err := seedClient.Set(context.Background(), addr, cachewire.SetRequest{
-			Key:       benchmarkBatchKey(fmt.Sprintf("parallel-get-%d", worker), 0),
-			Value:     []byte("value"),
-			TTLMillis: 60_000,
-		}); err != nil {
-			if closeErr := seedClient.Close(); closeErr != nil {
-				b.Fatalf("seed set before close: %v, close: %v", err, closeErr)
-			}
-			b.Fatalf("seed set key parallel-get-%d: %v", worker, err)
-		}
-	}
-	if err := seedClient.Close(); err != nil {
-		b.Fatalf("close seed benchmark frame client: %v", err)
-	}
-
-	var ops atomic.Uint64
-	var failures atomic.Uint64
-	var wg sync.WaitGroup
-	wg.Add(concurrency)
+	seedParallelGetKeys(b, addr, concurrency)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for worker := 0; worker < concurrency; worker++ {
-		client, err := newBenchmarkFrameClientForConcurrency(addr)
-		if err != nil {
-			b.Fatalf("create benchmark frame client: %v", err)
-		}
-		go func(w int, c *benchmarkFrameClient) {
-			defer wg.Done()
-			defer c.Close()
-
-			key := benchmarkBatchKey(fmt.Sprintf("parallel-get-%d", w), 0)
-			for {
-				idx := ops.Add(1) - 1
-				if idx >= uint64(b.N) {
-					return
-				}
-				if _, err := c.Get(context.Background(), addr, cachewire.GetRequest{Key: key}); err != nil {
-					failures.Add(1)
-					return
-				}
-			}
-		}(worker, client)
-	}
-
-	wg.Wait()
-	if failures.Load() > 0 {
-		b.Fatalf("parallel get failed: %d errors", failures.Load())
-	}
+	failures := runParallelBenchmark(b, addr, concurrency, parallelGetWorker(addr))
+	requireNoParallelBenchmarkFailures(b, "parallel get", failures)
 }
 
 func benchmarkServerParallelSetGet(b *testing.B, concurrency int) {
@@ -110,49 +60,11 @@ func benchmarkServerParallelSetGet(b *testing.B, concurrency int) {
 	addr, stopServer := startServerForConcurrencyBenchmark(b)
 	b.Cleanup(stopServer)
 
-	var ops atomic.Uint64
-	var failures atomic.Uint64
-	var wg sync.WaitGroup
-	wg.Add(concurrency)
-
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for worker := 0; worker < concurrency; worker++ {
-		client, err := newBenchmarkFrameClientForConcurrency(addr)
-		if err != nil {
-			b.Fatalf("create benchmark frame client: %v", err)
-		}
-		go func(w int, c *benchmarkFrameClient) {
-			defer wg.Done()
-			defer c.Close()
-
-			key := benchmarkBatchKey(fmt.Sprintf("parallel-setget-%d", w), 0)
-			for {
-				idx := ops.Add(1) - 1
-				if idx >= uint64(b.N) {
-					return
-				}
-				if _, err := c.Set(context.Background(), addr, cachewire.SetRequest{
-					Key:       key,
-					Value:     []byte("value"),
-					TTLMillis: 60_000,
-				}); err != nil {
-					failures.Add(1)
-					return
-				}
-				if _, err := c.Get(context.Background(), addr, cachewire.GetRequest{Key: key}); err != nil {
-					failures.Add(1)
-					return
-				}
-			}
-		}(worker, client)
-	}
-
-	wg.Wait()
-	if failures.Load() > 0 {
-		b.Fatalf("parallel set/get failed: %d errors", failures.Load())
-	}
+	failures := runParallelBenchmark(b, addr, concurrency, parallelSetGetWorker(addr))
+	requireNoParallelBenchmarkFailures(b, "parallel set/get", failures)
 }
 
 func benchmarkServerParallelBatchSet(b *testing.B, concurrency int) {
@@ -161,51 +73,154 @@ func benchmarkServerParallelBatchSet(b *testing.B, concurrency int) {
 	addr, stopServer := startServerForConcurrencyBenchmark(b)
 	b.Cleanup(stopServer)
 
-	const batchSize = 8
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	failures := runParallelBenchmark(b, addr, concurrency, parallelBatchSetWorker(addr))
+	requireNoParallelBenchmarkFailures(b, "parallel batch set", failures)
+}
+
+type parallelBenchmarkWorker func(*benchmarkFrameClient) error
+
+type parallelBenchmarkWorkerFactory func(int) parallelBenchmarkWorker
+
+func seedParallelGetKeys(b *testing.B, addr string, concurrency int) {
+	b.Helper()
+
+	seedClient, err := newBenchmarkFrameClientForConcurrency(addr)
+	if err != nil {
+		b.Fatalf("seed benchmark frame client: %v", err)
+	}
+	defer closeBenchmarkFrameClient(b, seedClient)
+
+	for worker := range concurrency {
+		if _, err := seedClient.Set(context.Background(), addr, cachewire.SetRequest{
+			Key:       benchmarkBatchKey(fmt.Sprintf("parallel-get-%d", worker), 0),
+			Value:     []byte("value"),
+			TTLMillis: 60_000,
+		}); err != nil {
+			b.Fatalf("seed set key parallel-get-%d: %v", worker, err)
+		}
+	}
+}
+
+func runParallelBenchmark(
+	b *testing.B,
+	addr string,
+	concurrency int,
+	factory parallelBenchmarkWorkerFactory,
+) uint64 {
+	b.Helper()
+
+	limit := benchmarkLimit(b)
 	var ops atomic.Uint64
 	var failures atomic.Uint64
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for worker := 0; worker < concurrency; worker++ {
-		client, err := newBenchmarkFrameClientForConcurrency(addr)
-		if err != nil {
-			b.Fatalf("create benchmark frame client: %v", err)
-		}
-		go func(w int, c *benchmarkFrameClient) {
-			defer wg.Done()
-			defer c.Close()
-
-			request := cachewire.BatchSetRequest{
-				Items: make([]cachewire.SetRequest, 0, batchSize),
-			}
-			for i := 0; i < batchSize; i++ {
-				request.Items = append(request.Items, cachewire.SetRequest{
-					Key:       benchmarkBatchKey(fmt.Sprintf("parallel-batch-%d", w), i),
-					Value:     []byte("batch-value"),
-					TTLMillis: 60_000,
-				})
-			}
-
-			for {
-				idx := ops.Add(1) - 1
-				if idx >= uint64(b.N) {
-					return
-				}
-				if _, err := c.BatchSet(context.Background(), addr, request); err != nil {
-					failures.Add(1)
-					return
-				}
-			}
-		}(worker, client)
+	for worker := range concurrency {
+		client := newParallelBenchmarkClient(b, addr)
+		go runParallelBenchmarkWorker(b, &wg, &ops, &failures, limit, client, factory(worker))
 	}
 
 	wg.Wait()
-	if failures.Load() > 0 {
-		b.Fatalf("parallel batch set failed: %d errors", failures.Load())
+	return failures.Load()
+}
+
+func newParallelBenchmarkClient(b *testing.B, addr string) *benchmarkFrameClient {
+	b.Helper()
+
+	client, err := newBenchmarkFrameClientForConcurrency(addr)
+	if err != nil {
+		b.Fatalf("create benchmark frame client: %v", err)
+	}
+	return client
+}
+
+func runParallelBenchmarkWorker(
+	b *testing.B,
+	wg *sync.WaitGroup,
+	ops *atomic.Uint64,
+	failures *atomic.Uint64,
+	limit uint64,
+	client *benchmarkFrameClient,
+	worker parallelBenchmarkWorker,
+) {
+	b.Helper()
+
+	defer wg.Done()
+	defer closeBenchmarkFrameClient(b, client)
+
+	for claimParallelBenchmarkOp(ops, limit) {
+		if err := worker(client); err != nil {
+			failures.Add(1)
+			return
+		}
+	}
+}
+
+func claimParallelBenchmarkOp(ops *atomic.Uint64, limit uint64) bool {
+	return ops.Add(1) <= limit
+}
+
+func parallelGetWorker(addr string) parallelBenchmarkWorkerFactory {
+	return func(worker int) parallelBenchmarkWorker {
+		key := benchmarkBatchKey(fmt.Sprintf("parallel-get-%d", worker), 0)
+		return func(client *benchmarkFrameClient) error {
+			_, err := client.Get(context.Background(), addr, cachewire.GetRequest{Key: key})
+			return err
+		}
+	}
+}
+
+func parallelSetGetWorker(addr string) parallelBenchmarkWorkerFactory {
+	return func(worker int) parallelBenchmarkWorker {
+		key := benchmarkBatchKey(fmt.Sprintf("parallel-setget-%d", worker), 0)
+		return func(client *benchmarkFrameClient) error {
+			if _, err := client.Set(context.Background(), addr, cachewire.SetRequest{
+				Key:       key,
+				Value:     []byte("value"),
+				TTLMillis: 60_000,
+			}); err != nil {
+				return err
+			}
+			_, err := client.Get(context.Background(), addr, cachewire.GetRequest{Key: key})
+			return err
+		}
+	}
+}
+
+func parallelBatchSetWorker(addr string) parallelBenchmarkWorkerFactory {
+	return func(worker int) parallelBenchmarkWorker {
+		request := parallelBatchSetRequest(worker)
+		return func(client *benchmarkFrameClient) error {
+			_, err := client.BatchSet(context.Background(), addr, request)
+			return err
+		}
+	}
+}
+
+func parallelBatchSetRequest(worker int) cachewire.BatchSetRequest {
+	const batchSize = 8
+
+	request := cachewire.BatchSetRequest{
+		Items: make([]cachewire.SetRequest, 0, batchSize),
+	}
+	for i := range batchSize {
+		request.Items = append(request.Items, cachewire.SetRequest{
+			Key:       benchmarkBatchKey(fmt.Sprintf("parallel-batch-%d", worker), i),
+			Value:     []byte("batch-value"),
+			TTLMillis: 60_000,
+		})
+	}
+	return request
+}
+
+func requireNoParallelBenchmarkFailures(b *testing.B, name string, failures uint64) {
+	b.Helper()
+
+	if failures > 0 {
+		b.Fatalf("%s failed: %d errors", name, failures)
 	}
 }
 
@@ -233,19 +248,4 @@ func startServerForConcurrencyBenchmark(b *testing.B) (string, func()) {
 	}
 
 	return server.Addr(), stop
-}
-
-func newBenchmarkFrameClientForConcurrency(addr string) (*benchmarkFrameClient, error) {
-	dialer := &net.Dialer{
-		Timeout:   5 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}
-	conn, err := dialer.Dial("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("create benchmark tcp client: %w", err)
-	}
-	return &benchmarkFrameClient{
-		conn:  conn,
-		codec: protocol.NewCodec(),
-	}, nil
 }

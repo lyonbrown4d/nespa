@@ -36,32 +36,6 @@ type replicationOutboxSnapshot struct {
 	maxSequence uint64
 }
 
-func scanReplicationOutbox(path string) (replicationOutboxSnapshot, error) {
-	dir, name, err := replicationOutboxDirAndName(path)
-	if err != nil {
-		return replicationOutboxSnapshot{}, err
-	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return replicationOutboxSnapshot{}, nil
-		}
-		return replicationOutboxSnapshot{}, fmt.Errorf("open replication outbox directory: %w", err)
-	}
-	defer closeReplicationOutboxRoot(root)
-
-	file, err := root.Open(name)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return replicationOutboxSnapshot{}, nil
-		}
-		return replicationOutboxSnapshot{}, fmt.Errorf("open replication outbox for scan: %w", err)
-	}
-	defer closeReplicationOutboxFile(file)
-
-	return readReplicationOutboxSnapshot(file)
-}
-
 func scanReplicationOutboxEntries(path string) ([]replicationOutboxEntry, error) {
 	dir, name, err := replicationOutboxDirAndName(path)
 	if err != nil {
@@ -157,25 +131,6 @@ func replicationOutboxDirAndName(path string) (string, string, error) {
 		dir = "."
 	}
 	return dir, name, nil
-}
-
-func readReplicationOutboxSnapshot(reader io.Reader) (replicationOutboxSnapshot, error) {
-	var snapshot replicationOutboxSnapshot
-	decoder := json.NewDecoder(reader)
-	for {
-		var entry replicationOutboxEntry
-		err := decoder.Decode(&entry)
-		if errors.Is(err, io.EOF) {
-			return snapshot, nil
-		}
-		if err != nil {
-			return replicationOutboxSnapshot{}, fmt.Errorf("decode replication outbox entry: %w", err)
-		}
-		snapshot.entries++
-		if entry.Sequence > snapshot.maxSequence {
-			snapshot.maxSequence = entry.Sequence
-		}
-	}
 }
 
 func closeReplicationOutboxRoot(root *os.Root) {
