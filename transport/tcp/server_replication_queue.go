@@ -56,9 +56,9 @@ type replicationDispatcher struct {
 	retryMaxDelay     time.Duration
 	jobs              chan replicationJob
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	done     chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 
 	statsMu sync.RWMutex
 	stats   ReplicationStats
@@ -77,15 +77,13 @@ func newReplicationDispatcher(client *Client, timeout time.Duration, queueSize i
 	if queueSize <= 0 {
 		queueSize = defaultReplicationQueueSize
 	}
-	ctx, cancel := context.WithCancel(context.Background())
 	dispatcher := &replicationDispatcher{
 		client:            client,
 		timeout:           timeout,
 		retryInitialDelay: defaultReplicationRetryInitialDelay,
 		retryMaxDelay:     defaultReplicationRetryMaxDelay,
 		jobs:              make(chan replicationJob, queueSize),
-		ctx:               ctx,
-		cancel:            cancel,
+		done:              make(chan struct{}),
 		queued:            map[string]uint64{},
 	}
 	dispatcher.wg.Go(dispatcher.run)
@@ -107,7 +105,9 @@ func (d *replicationDispatcher) Enqueue(target string, command replicationComman
 }
 
 func (d *replicationDispatcher) Stop(ctx context.Context) error {
-	d.cancel()
+	d.stopOnce.Do(func() {
+		close(d.done)
+	})
 
 	done := make(chan struct{})
 	go func() {
@@ -132,7 +132,7 @@ func (d *replicationDispatcher) run() {
 
 	for {
 		select {
-		case <-d.ctx.Done():
+		case <-d.done:
 			return
 		case <-replayTicker.C:
 			d.replayOutboxFromDisk()
@@ -145,7 +145,7 @@ func (d *replicationDispatcher) run() {
 func (d *replicationDispatcher) send(job replicationJob) {
 	delay := d.retryInitialDelay
 	for {
-		ctx, cancel := context.WithTimeout(d.ctx, d.timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), d.timeout)
 		d.recordAttempt(job)
 		err := job.command.send(ctx, d.client, job.target)
 		cancel()
@@ -164,12 +164,12 @@ func (d *replicationDispatcher) send(job replicationJob) {
 
 func (d *replicationDispatcher) enqueueReplicationJob(job replicationJob) {
 	select {
-	case <-d.ctx.Done():
+	case <-d.done:
 		return
 	default:
 	}
 	select {
-	case <-d.ctx.Done():
+	case <-d.done:
 		return
 	case d.jobs <- job:
 		d.recordEnqueued(job.sequence)
@@ -187,7 +187,7 @@ func (d *replicationDispatcher) waitRetry(delay time.Duration) bool {
 	defer timer.Stop()
 
 	select {
-	case <-d.ctx.Done():
+	case <-d.done:
 		return false
 	case <-timer.C:
 		return true
